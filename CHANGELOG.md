@@ -1,5 +1,24 @@
 # Changelog
 
+## v0.15.0 - 2026-04-08
+
+### New Features
+
+- review history auto-save on quit #72 @umputun
+- community themes, gallery, CLI install, and interactive selector #69 @melonamin
+- pause review loop on explanation annotations
+
+### Improvements
+
+- layout-agnostic key bindings for non-Latin keyboards #71 @sanchesfree
+- use CLAUDE_SKILL_DIR instead of CLAUDE_PLUGIN_ROOT #70 @rashpile
+- handle long-running launcher on harnesses with short bash timeouts #51 @rashpile
+
+### Bug Fixes
+
+- shell-quote arguments in overlay launcher scripts #58 @melonamin
+- add fsutil tests and handle SetStyle error in theme cancel
+
 ## v0.14.1 - 2026-04-08
 
 ### Bug Fixes
