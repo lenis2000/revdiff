@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.14.1 - 2026-04-08
+
+### Bug Fixes
+
+- truncate long diff lines to prevent overflow past right padding
+- extend line bg after scroll so colored backgrounds fill at any offset
+
 ## v0.14.0 - 2026-04-08
 
 ### New Features
