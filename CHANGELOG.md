@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.15.1 - 2026-04-08
+
+### Bug Fixes
+
+- exclude file with no changes from file list #75 @daulet
+
 ## v0.15.0 - 2026-04-08
 
 ### New Features
