@@ -1,10 +1,9 @@
 # Codex CLI integration
 
-This directory contains the **Codex CLI** plugin for revdiff.
+This directory contains the **Codex CLI** skills for revdiff.
 
 ## Contents
 
-- `.codex-plugin/plugin.json` — plugin manifest
 - `skills/revdiff/SKILL.md` — diff review skill (same workflow as Claude Code plugin)
 - `skills/revdiff/scripts/` — detect-ref.sh, launch-revdiff.sh
 - `skills/revdiff/references/` — config.md, install.md, usage.md
@@ -19,13 +18,12 @@ This directory contains the **Codex CLI** plugin for revdiff.
 
 ## Install
 
-Copy the plugin directory to your Codex plugins location:
+Copy each skill to your Codex skills directory:
 
 ```bash
-cp -r plugins/codex ~/.codex/plugins/revdiff
+cp -r plugins/codex/skills/revdiff ~/.codex/skills/revdiff
+cp -r plugins/codex/skills/revdiff-plan ~/.codex/skills/revdiff-plan
 ```
-
-Or, if working from a cloned repo, Codex discovers the plugin via `.agents/plugins/marketplace.json` at the repo root.
 
 ## Skills
 

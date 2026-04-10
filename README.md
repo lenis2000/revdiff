@@ -173,11 +173,9 @@ The plugin uses the same terminal overlay mechanism (tmux, Zellij, kitty, wezter
 **Install:**
 
 ```bash
-# copy plugin to Codex plugins directory
-cp -r plugins/codex ~/.codex/plugins/revdiff
-
-# or, if working from a cloned repo, Codex discovers the plugin
-# automatically via .agents/plugins/marketplace.json
+# copy skills to Codex skills directory
+cp -r plugins/codex/skills/revdiff ~/.codex/skills/revdiff
+cp -r plugins/codex/skills/revdiff-plan ~/.codex/skills/revdiff-plan
 ```
 
 **Requirements:**

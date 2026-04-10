@@ -16,7 +16,7 @@ Resolve the script directory using repo root first, then fall back to Codex home
 ```bash
 SCRIPT_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/codex/skills/revdiff-plan/scripts"
 if [ ! -d "$SCRIPT_DIR" ]; then
-    SCRIPT_DIR="${CODEX_HOME:-$HOME/.codex}/plugins/revdiff/skills/revdiff-plan/scripts"
+    SCRIPT_DIR="${CODEX_HOME:-$HOME/.codex}/skills/revdiff-plan/scripts"
 fi
 ```
 
@@ -25,7 +25,7 @@ Also resolve the launcher script from the revdiff skill:
 ```bash
 LAUNCHER_DIR="$(git rev-parse --show-toplevel 2>/dev/null)/plugins/codex/skills/revdiff/scripts"
 if [ ! -d "$LAUNCHER_DIR" ]; then
-    LAUNCHER_DIR="${CODEX_HOME:-$HOME/.codex}/plugins/revdiff/skills/revdiff/scripts"
+    LAUNCHER_DIR="${CODEX_HOME:-$HOME/.codex}/skills/revdiff/scripts"
 fi
 ```
 
