@@ -225,36 +225,36 @@ revdiff --only=/tmp/draft-comment.md</code></div>
         </ul>
 
         <h3>Task definitions</h3>
-        <p>Add these to your <code>.zed/tasks.json</code> (create the file if it doesn't exist):</p>
-        <div class="code-block"><code>{
-  "label": "revdiff current file",
-  "command": "rm -f /tmp/revdiff-out.txt; revdiff --only=$ZED_FILE --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
-  "use_new_terminal": true,
-  "allow_concurrent_runs": false,
-  "reveal": "always",
-  "reveal_target": "center",
-  "hide": "on_success"
-}
-
-{
-  "label": "revdiff vs master",
-  "command": "rm -f /tmp/revdiff-out.txt; MAIN=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo master); revdiff $MAIN --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
-  "use_new_terminal": true,
-  "allow_concurrent_runs": false,
-  "reveal": "always",
-  "reveal_target": "center",
-  "hide": "on_success"
-}
-
-{
-  "label": "revdiff uncommitted",
-  "command": "rm -f /tmp/revdiff-out.txt; revdiff --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
-  "use_new_terminal": true,
-  "allow_concurrent_runs": false,
-  "reveal": "always",
-  "reveal_target": "center",
-  "hide": "on_success"
-}</code></div>
+        <p>Add these to your <code>.zed/tasks.json</code> (create the file if it doesn't exist). The file must contain a JSON array, so paste the whole block below; if you already have tasks, add each object to the existing <code>tasks</code> array.</p>
+        <div class="code-block"><code>[
+  {
+    "label": "revdiff current file",
+    "command": "rm -f /tmp/revdiff-out.txt; revdiff --only=\"$ZED_FILE\" --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "on_success"
+  },
+  {
+    "label": "revdiff vs master",
+    "command": "rm -f /tmp/revdiff-out.txt; MAIN=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||' || echo master); revdiff \"$MAIN\" --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "on_success"
+  },
+  {
+    "label": "revdiff uncommitted",
+    "command": "rm -f /tmp/revdiff-out.txt; revdiff --output=/tmp/revdiff-out.txt; [ -f /tmp/revdiff-out.txt ] && pbcopy < /tmp/revdiff-out.txt; true",
+    "use_new_terminal": true,
+    "allow_concurrent_runs": false,
+    "reveal": "always",
+    "reveal_target": "center",
+    "hide": "on_success"
+  }
+]</code></div>
         <p>These examples use <code>pbcopy</code> to copy annotations to clipboard, which is macOS-only. On Linux, replace <code>pbcopy</code> with <code>xclip -selection clipboard</code> or <code>wl-copy</code> (Wayland).</p>
 
         <h3>Keybinding</h3>
