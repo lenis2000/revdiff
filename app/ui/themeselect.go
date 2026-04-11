@@ -11,6 +11,7 @@ import (
 
 	"github.com/umputun/revdiff/app/keymap"
 	"github.com/umputun/revdiff/app/theme"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 const (
@@ -23,14 +24,16 @@ const (
 
 // themeSelectState holds all state for the theme selector overlay.
 type themeSelectState struct {
-	active     bool         // true when overlay is visible
-	all        []themeEntry // all available themes (unfiltered)
-	entries    []themeEntry // filtered view into all
-	cursor     int          // selected item in filtered list
-	offset     int          // scroll offset
-	filter     string       // current filter text
-	origStyles styles       // saved styles for cancel/restore
-	origChroma string       // saved chroma style name for cancel/restore
+	active       bool          // true when overlay is visible
+	all          []themeEntry  // all available themes (unfiltered)
+	entries      []themeEntry  // filtered view into all
+	cursor       int           // selected item in filtered list
+	offset       int           // scroll offset
+	filter       string        // current filter text
+	origResolver styleResolver // saved resolver for cancel/restore
+	origRenderer styleRenderer // saved renderer for cancel/restore
+	origSGR      sgrProcessor  // saved SGR for cancel/restore
+	origChroma   string        // saved chroma style name for cancel/restore
 }
 
 // themeEntry represents a single entry in the theme selector list.
@@ -52,7 +55,9 @@ func (m *Model) openThemeSelector() {
 	m.themeSel.active = true
 
 	// save current state so Esc can restore
-	m.themeSel.origStyles = m.styles
+	m.themeSel.origResolver = m.resolver
+	m.themeSel.origRenderer = m.renderer
+	m.themeSel.origSGR = m.sgr
 	m.themeSel.origChroma = m.highlighter.StyleName()
 
 	m.applyThemeFilter()
@@ -126,8 +131,8 @@ func (m Model) themeSelectOverlay() string {
 	parts = append(parts, filterLine, "")
 
 	if len(m.themeSel.entries) == 0 {
-		muted := m.ansiFg(m.styles.colors.Muted)
-		parts = append(parts, muted+"  no matches"+"\033[39m")
+		muted := m.resolver.Color(style.ColorKeyMutedFg)
+		parts = append(parts, string(muted)+"  no matches"+string(style.ResetFg))
 	} else {
 		for i := m.themeSel.offset; i < len(m.themeSel.entries) && i < m.themeSel.offset+maxVisible; i++ {
 			e := m.themeSel.entries[i]
@@ -145,16 +150,7 @@ func (m Model) themeSelectOverlay() string {
 		title = fmt.Sprintf(" themes (%d/%d) ", showing, total)
 	}
 
-	border := lipgloss.NormalBorder()
-	boxStyle := lipgloss.NewStyle().
-		Border(border).
-		BorderForeground(lipgloss.Color(m.styles.colors.Accent)).
-		Padding(1, 1).
-		Width(popupWidth)
-	if m.styles.colors.DiffBg != "" {
-		bg := lipgloss.Color(m.styles.colors.DiffBg)
-		boxStyle = boxStyle.Background(bg).BorderBackground(bg)
-	}
+	boxStyle := m.resolver.Style(style.StyleKeyThemeSelectBox).Width(popupWidth)
 
 	box := boxStyle.Render(content)
 	box = m.injectBorderTitle(box, title, popupWidth)
@@ -163,13 +159,13 @@ func (m Model) themeSelectOverlay() string {
 
 // renderThemeFilter renders the filter input line, aligned with list item names.
 func (m Model) renderThemeFilter() string {
-	accent := m.ansiFg(m.styles.colors.Accent)
-	muted := m.ansiFg(m.styles.colors.Muted)
+	accent := m.resolver.Color(style.ColorKeyAccentFg)
+	muted := m.resolver.Color(style.ColorKeyMutedFg)
 
 	if m.themeSel.filter == "" {
-		return "  " + muted + "type to filter..." + "\033[39m"
+		return "  " + string(muted) + "type to filter..." + string(style.ResetFg)
 	}
-	return "  " + m.themeSel.filter + accent + "│" + "\033[39m"
+	return "  " + m.themeSel.filter + string(accent) + "│" + string(style.ResetFg)
 }
 
 // formatThemeEntry formats a single theme entry with accent color swatch.
@@ -178,15 +174,15 @@ func (m Model) formatThemeEntry(e themeEntry, width int, selected bool) string {
 
 	// swatch: ■ colored with theme's accent for gallery, ◇ for local
 	var swatch string
-	resetHex := ""
+	var resetFg string
 	if selected {
-		resetHex = m.styles.colors.SelectedFg
+		resetFg = string(m.resolver.Color(style.ColorKeySelectedFg))
 	}
 	switch {
 	case e.local:
-		swatch = coloredTextWithReset(m.styles.colors.Muted, "◇", resetHex)
+		swatch = swatchText(string(m.resolver.Color(style.ColorKeyMutedFg)), "◇", resetFg)
 	case accentColor != "":
-		swatch = coloredTextWithReset(accentColor, "■", resetHex)
+		swatch = swatchText(style.AnsiFg(accentColor), "■", resetFg)
 	default:
 		swatch = "■"
 	}
@@ -198,12 +194,13 @@ func (m Model) formatThemeEntry(e themeEntry, width int, selected bool) string {
 		name = runewidth.Truncate(name, nameMaxWidth, "…")
 	}
 
+	fileSelected := m.resolver.Style(style.StyleKeyFileSelected)
 	if selected {
 		line := "> " + swatch + " " + name
-		styled := m.styles.FileSelected.Render(line)
+		styled := fileSelected.Render(line)
 		w := lipgloss.Width(styled)
 		if w < width {
-			styled += m.styles.FileSelected.Render(strings.Repeat(" ", width-w))
+			styled += fileSelected.Render(strings.Repeat(" ", width-w))
 		}
 		return styled
 	}
@@ -287,12 +284,16 @@ func (m *Model) previewTheme() {
 
 // applyTheme rebuilds styles and re-highlights the current file.
 func (m *Model) applyTheme(th theme.Theme) {
-	colors := colorsFromTheme(th)
+	sc := colorsFromTheme(th)
+	var res style.Resolver
 	if m.noColors {
-		m.styles = plainStyles()
+		res = style.PlainResolver()
 	} else {
-		m.styles = newStyles(colors)
+		res = style.NewResolver(sc)
 	}
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	prevStyle := m.highlighter.StyleName()
 	chromaChanged := false
 	if th.ChromaStyle != prevStyle {
@@ -335,7 +336,9 @@ func (m Model) confirmThemeSelect() (tea.Model, tea.Cmd) {
 func (m *Model) cancelThemeSelect() {
 	m.themeSel.active = false
 	m.themeSel.filter = ""
-	m.styles = m.themeSel.origStyles
+	m.resolver = m.themeSel.origResolver
+	m.renderer = m.themeSel.origRenderer
+	m.sgr = m.themeSel.origSGR
 	if !m.highlighter.SetStyle(m.themeSel.origChroma) {
 		log.Printf("[WARN] failed to restore chroma style %q", m.themeSel.origChroma)
 	}
@@ -357,29 +360,44 @@ func (m Model) themeSelectMaxVisible() int {
 	return max(min(len(m.themeSel.entries), available), 1)
 }
 
-// colorsFromTheme converts a theme.Theme to a ui.Colors struct.
-func colorsFromTheme(th theme.Theme) Colors {
-	return Colors{
-		Accent:     th.Colors["color-accent"],
-		Border:     th.Colors["color-border"],
-		Normal:     th.Colors["color-normal"],
-		Muted:      th.Colors["color-muted"],
-		SelectedFg: th.Colors["color-selected-fg"],
-		SelectedBg: th.Colors["color-selected-bg"],
-		Annotation: th.Colors["color-annotation"],
-		CursorFg:   th.Colors["color-cursor-fg"],
-		CursorBg:   th.Colors["color-cursor-bg"],
-		AddFg:      th.Colors["color-add-fg"],
-		AddBg:      th.Colors["color-add-bg"],
-		RemoveFg:   th.Colors["color-remove-fg"],
-		RemoveBg:   th.Colors["color-remove-bg"],
-		ModifyFg:   th.Colors["color-modify-fg"],
-		ModifyBg:   th.Colors["color-modify-bg"],
-		TreeBg:     th.Colors["color-tree-bg"],
-		DiffBg:     th.Colors["color-diff-bg"],
-		StatusFg:   th.Colors["color-status-fg"],
-		StatusBg:   th.Colors["color-status-bg"],
-		SearchFg:   th.Colors["color-search-fg"],
-		SearchBg:   th.Colors["color-search-bg"],
+// colorsFromTheme converts a theme.Theme to a style.Colors struct.
+func colorsFromTheme(th theme.Theme) style.Colors {
+	return style.Colors{
+		Accent:       th.Colors["color-accent"],
+		Border:       th.Colors["color-border"],
+		Normal:       th.Colors["color-normal"],
+		Muted:        th.Colors["color-muted"],
+		SelectedFg:   th.Colors["color-selected-fg"],
+		SelectedBg:   th.Colors["color-selected-bg"],
+		Annotation:   th.Colors["color-annotation"],
+		CursorFg:     th.Colors["color-cursor-fg"],
+		CursorBg:     th.Colors["color-cursor-bg"],
+		AddFg:        th.Colors["color-add-fg"],
+		AddBg:        th.Colors["color-add-bg"],
+		RemoveFg:     th.Colors["color-remove-fg"],
+		RemoveBg:     th.Colors["color-remove-bg"],
+		WordAddBg:    th.Colors["color-word-add-bg"],
+		WordRemoveBg: th.Colors["color-word-remove-bg"],
+		ModifyFg:     th.Colors["color-modify-fg"],
+		ModifyBg:     th.Colors["color-modify-bg"],
+		TreeBg:       th.Colors["color-tree-bg"],
+		DiffBg:       th.Colors["color-diff-bg"],
+		StatusFg:     th.Colors["color-status-fg"],
+		StatusBg:     th.Colors["color-status-bg"],
+		SearchFg:     th.Colors["color-search-fg"],
+		SearchBg:     th.Colors["color-search-bg"],
 	}
+}
+
+// swatchText renders text with the given ANSI fg sequence and resets afterward.
+// if fg is empty, returns text unchanged. if resetFg is empty, uses style.ResetFg.
+func swatchText(fg, text, resetFg string) string {
+	if fg == "" {
+		return text
+	}
+	reset := string(style.ResetFg)
+	if resetFg != "" {
+		reset = resetFg
+	}
+	return fg + text + reset
 }

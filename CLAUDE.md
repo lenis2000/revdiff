@@ -27,8 +27,11 @@ TUI for reviewing diffs, files, and documents with inline annotations, built wit
   - `mdtoc.go` - markdown TOC component
   - `search.go` - search input and navigation
   - `worddiff.go` - intra-line word-diff: tokenizer, LCS, line pairing, range computation
-  - `colorutil.go` - color utility: HSL conversion, shiftLightness for auto-deriving word-diff bg
-  - `styles.go` - lipgloss styles and theme integration
+  - `model.go` also holds consumer-side interfaces (styleResolver, styleRenderer, sgrProcessor) with compile-time assertions
+- `app/ui/style/` - color and style resolution sub-package. Owns all hex-to-ANSI conversion, lipgloss style construction, SGR state tracking, HSL color math, and semantic color accessors. Three main types:
+  - `style.Resolver` - static and runtime style/color lookups (Color, Style, LineBg, LineStyle, WordDiffBg, IndicatorBg)
+  - `style.Renderer` - compound ANSI rendering (AnnotationInline, DiffCursor, StatusBarSeparator, FileStatusMark, FileReviewedMark, FileAnnotationMark)
+  - `style.SGR` - ANSI SGR stream processing (Reemit for wrap-mode continuation lines)
 - `app/highlight/` - chroma-based syntax highlighting, foreground-only ANSI output
 - `app/keymap/` - user-configurable keybindings (`Action` constants, `Keymap` type, parser, defaults, dump)
 - `app/theme/` - color theme system: Parse (with hex validation), Load, List, Dump, InitBundled, ColorKeys (bundled: revdiff, catppuccin-mocha, catppuccin-latte, dracula, gruvbox, nord, solarized-dark)
@@ -39,6 +42,9 @@ TUI for reviewing diffs, files, and documents with inline annotations, built wit
 ## Key Interfaces (consumer-side, in `app/ui/`)
 - `Renderer` - `ChangedFiles()`, `FileDiff()` - implemented by `diff.Git`, `diff.FallbackRenderer`, `diff.FileReader`, `diff.DirectoryReader`, `diff.StdinReader`, `diff.ExcludeFilter`
 - `SyntaxHighlighter` - `HighlightLines()` - implemented by `highlight.Highlighter`
+- `styleResolver` - `Color()`, `Style()`, `LineBg()`, `LineStyle()`, `WordDiffBg()`, `IndicatorBg()` - implemented by `style.Resolver`
+- `styleRenderer` - `AnnotationInline()`, `DiffCursor()`, `StatusBarSeparator()`, `FileStatusMark()`, `FileReviewedMark()`, `FileAnnotationMark()` - implemented by `style.Renderer`
+- `sgrProcessor` - `Reemit()` - implemented by `style.SGR`
 
 ## Data Flow
 ```
@@ -60,20 +66,20 @@ git diff → diff.parseUnifiedDiff() → []DiffLine
       uses buildModifiedSet() to style adds as modify (amber ~) or pure add (green +)
       expanded hunks (`.` toggle) show all lines inline
   when line numbers are on (`L` toggle, orthogonal to above):
-    lineNumGutter(dl) formats " OOO NNN" gutter via m.styles.LineNumber,
+    lineNumGutter(dl) formats " OOO NNN" gutter via m.resolver.Style(StyleKeyLineNumber),
     prepended in renderDiffLine, renderWrappedDiffLine, renderCollapsedAddLine, renderDeletePlaceholder
     lineNumWidth recomputed per file in handleFileLoaded; lineNumGutterWidth() = 2*W+2
   when blame gutter is on (`B` toggle, orthogonal to above):
-    blameGutter(dl, now) formats " author age" gutter via m.styles.LineNumber,
+    blameGutter(dl, now) formats " author age" gutter via m.resolver.Style(StyleKeyLineNumber),
     prepended after lineNumGutter in renderDiffLine, renderWrappedDiffLine, renderCollapsedAddLine, renderDeletePlaceholder
     blame data loaded async via loadBlame() → blameLoadedMsg; keyed by NewNum (blank for removed lines/dividers)
     blameAuthorLen capped at 8; blameGutterWidth() = W+5; Blamer interface (optional, nil when git unavailable)
   when wrap mode is on (`w` toggle, orthogonal to above):
     wrapContent() splits long lines via ansi.Wrap,
     continuation lines get `↪` gutter marker, cursorViewportY() sums wrapped line counts.
-    ansi.Wrap does not preserve SGR state across inserted newlines, so reemitANSIState()
+    ansi.Wrap does not preserve SGR state across inserted newlines, so m.sgr.Reemit()
     re-prepends active fg color, bold, italic, and bg at the start of each continuation line.
-    State tracking via scanANSIState()/parseSGR()/applySGR(); handles chroma's fg (24-bit/basic),
+    State tracking via style.SGR internal methods; handles chroma's fg (24-bit/basic),
     bold (1/22), italic (3/23), bg (48;2;r;g;b/49), fg reset (39), and full reset (0/bare)
   when search is active (`/` to search, `n`/`N` to navigate, `esc` to clear):
     buildSearchMatchSet() converts match indices to O(1) map per render,
@@ -144,8 +150,8 @@ git diff → diff.parseUnifiedDiff() → []DiffLine
 - `--all-files` mode uses `DirectoryReader` (git ls-files) to list all tracked files; `--exclude` wraps any renderer with `ExcludeFilter` for prefix-based filtering. `--all-files` is mutually exclusive with refs, `--staged`, and `--only`. `--stdin` is mutually exclusive with refs, `--staged`, `--only`, `--all-files`, and `--exclude`.
 - `diff.readReaderAsContext()` is the shared parser for file-backed and stdin-backed context-only views. Preserve its behavior if you change binary detection, line-length handling, or line numbering.
 - Help overlay uses `overlayCenter()` (ANSI-aware compositing via `charmbracelet/x/ansi.Cut`) to render on top of existing content; background (tree pane) remains visible at the edges
-- **ANSI nesting with lipgloss**: `lipgloss.Render()` emits `\033[0m` (full reset) which breaks outer style backgrounds. For styled substrings inside a lipgloss container (status bar separators, search highlights, diff cursor, annotation lines), use raw ANSI sequences via `ansiColor(hex, code)` / `ansiFg(hex)` / `ansiBg(hex)`, or dedicated helpers `diffCursorCell()` and `annotationInline()`. Never use `lipgloss.NewStyle().Render()` for inline elements within a lipgloss-rendered parent.
-- **Background fill for themed panes**: lipgloss pane `Render()` and viewport internal padding emit plain spaces after `\033[0m` reset, causing pane background to show terminal default. Three workarounds: (1) `extendLineBg()` pads individual add/remove/modify lines to full content width with their specific bg color; (2) `padContentBg()` strips viewport trailing spaces and re-pads every line of pane content with DiffBg/TreeBg; (3) `BorderBackground()` is set on pane border styles to match pane bg. Context and line-number styles also set DiffBg explicitly via `contextStyle()`/`lineNumberStyle()`/`contextHighlightStyle()`. **Ordering constraint**: `extendLineBg()` must be called AFTER `applyHorizontalScroll()` — extending before scroll causes bg fill to be computed for the wrong visible width. `styleDiffContent()` does NOT call `extendLineBg` internally; callers handle it via `changeBgColor()`.
+- **ANSI nesting with lipgloss**: `lipgloss.Render()` emits `\033[0m` (full reset) which breaks outer style backgrounds. For styled substrings inside a lipgloss container (status bar separators, search highlights, diff cursor, annotation lines), use raw ANSI sequences via the style sub-package (`style.AnsiFg`, `resolver.Color`), or dedicated `Renderer` methods (`Renderer.DiffCursor`, `Renderer.AnnotationInline`). Never use `lipgloss.NewStyle().Render()` for inline elements within a lipgloss-rendered parent.
+- **Background fill for themed panes**: lipgloss pane `Render()` and viewport internal padding emit plain spaces after `\033[0m` reset, causing pane background to show terminal default. Three workarounds: (1) `extendLineBg()` pads individual add/remove/modify lines to full content width with their specific bg color; (2) `padContentBg()` strips viewport trailing spaces and re-pads every line of pane content with DiffBg/TreeBg; (3) `BorderBackground()` is set on pane border styles to match pane bg. Context and line-number styles also set DiffBg explicitly via internal `Colors` methods in the style sub-package. **Ordering constraint**: `extendLineBg()` must be called AFTER `applyHorizontalScroll()` — extending before scroll causes bg fill to be computed for the wrong visible width. `styleDiffContent()` does NOT call `extendLineBg` internally; callers handle it via `resolver.LineBg()`.
 - Horizontal scroll overflow indicators (`«` / `»`): `applyHorizontalScroll()` replaces the first visible column with `«` when scrolled right past hidden content and extends 1 col beyond `cutWidth` into the pane's right padding column to place `»` flush against the pane border. The right indicator always includes a leading space separator so the glyph doesn't touch the last content character. Because the right-overflow path outputs width `cutWidth + 1`, `extendLineBg()` becomes a no-op for these lines (current > target). Non-overflow lines keep the design-intent 1-col right padding via `padContentBg()`. Background resolution is split between the two cells: the `«` glyph and the right indicator's leading separator space both use the line bg resolved by `indicatorBg(lineBg)` (line bg for add/remove/modify, `DiffBg` for context/divider) so the colored content area extends naturally; the `»` glyph itself is always drawn on `DiffBg` regardless of line bg so it reads as pane chrome, not as part of the line. This split is handled inside `rightScrollIndicator()` via `scrollIndicatorANSI(glyph, spaceBg, glyphBg, leadingSpace)`. Fg is always `Muted`; no-colors mode falls back to reverse video. Only active in unwrapped mode — `renderWrappedDiffLine()` and wrapped-collapsed paths never call `applyHorizontalScroll()`.
 - Status bar mode icons (`▼ ◉ ↩ ≋ ⊟ # b ± ✓ ∅`) are always rendered on the right side via `statusModeIcons()`. `▼` collapsed mode (`v`), `◉` filter (`f`), `↩` wrap (`w`), `≋` search active, `⊟` tree/TOC pane hidden (`t`), `#` line numbers (`L`), `b` blame gutter (`B`), `±` intra-line word-diff (`W`), `✓` reviewed count, `∅` untracked visible (`u`). Active modes use `StatusFg`, inactive use `Muted` — both via raw ANSI fg sequences. Graceful degradation on narrow terminals drops left segments: search position first (`statusSegmentsNoSearch`), then line number and hunk info (`statusSegmentsMinimal`), then truncates filename.
 - Search and hunk navigation both use `centerViewportOnCursor()` to center the target in the middle of the viewport. Use `syncViewportToCursor()` only for cursor movements that should keep the cursor barely visible (j/k scrolling).

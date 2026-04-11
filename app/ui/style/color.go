@@ -1,9 +1,65 @@
-package ui
+package style
 
 import (
 	"fmt"
+	"io"
 	"math"
+	"strings"
 )
+
+// Color is an ANSI escape sequence ready to write to a terminal stream.
+// Zero value is an empty Color (no-op when written).
+//
+// Color has no methods. fmt verbs work on the underlying string value
+// (since Color is a string type alias), and emptiness is checked with
+// c != "". The style.Write(w, c) helper handles io.Writer cases that
+// need a string() cast. If a specific call site later requires methods
+// on Color, add them then — not speculatively.
+type Color string
+
+// theme-independent reset sequences.
+const (
+	ResetFg Color = "\033[39m"
+	ResetBg Color = "\033[49m"
+)
+
+// AnsiFg returns an ANSI 24-bit foreground color escape for a #RRGGBB hex string.
+// returns empty string for invalid input.
+func AnsiFg(hex string) string { return ansiColor(hex, 38) }
+
+// ansiColor returns an ANSI 24-bit color escape sequence for a hex color.
+// code 38 = foreground, 48 = background. uses raw ANSI instead of lipgloss.Render
+// to avoid full reset that breaks outer backgrounds.
+// accepts hex with or without leading '#'. returns empty string for invalid input.
+func ansiColor(hex string, code int) string {
+	hex = strings.TrimPrefix(hex, "#")
+	if len(hex) != 6 {
+		return ""
+	}
+	for i := range 6 {
+		c := hex[i]
+		if (c < '0' || c > '9') && (c < 'a' || c > 'f') && (c < 'A' || c > 'F') {
+			return ""
+		}
+	}
+	r := hexVal(hex[0])<<4 | hexVal(hex[1])
+	g := hexVal(hex[2])<<4 | hexVal(hex[3])
+	b := hexVal(hex[4])<<4 | hexVal(hex[5])
+	return fmt.Sprintf("\033[%d;2;%d;%d;%dm", code, r, g, b)
+}
+
+// Write writes a Color value to w. returns the number of bytes written and any error.
+// if c is empty, writes nothing and returns (0, nil).
+func Write(w io.Writer, c Color) (int, error) {
+	if c == "" {
+		return 0, nil
+	}
+	n, err := io.WriteString(w, string(c))
+	if err != nil {
+		return n, fmt.Errorf("write color: %w", err)
+	}
+	return n, nil
+}
 
 // shiftLightness shifts a hex color's lightness toward 0.5 by the given amount.
 // dark colors get lighter, light colors get darker. returns "#RRGGBB" format.
@@ -44,6 +100,21 @@ func parseHexRGB(hex string) (r, g, b uint8, ok bool) {
 	gv := hexVal(hex[3])<<4 | hexVal(hex[4])
 	bv := hexVal(hex[5])<<4 | hexVal(hex[6])
 	return rv, gv, bv, true
+}
+
+// hexVal converts a single hex digit character to its numeric value (0-15).
+// returns 0 for invalid characters.
+func hexVal(c byte) byte {
+	switch {
+	case c >= '0' && c <= '9':
+		return c - '0'
+	case c >= 'a' && c <= 'f':
+		return c - 'a' + 10
+	case c >= 'A' && c <= 'F':
+		return c - 'A' + 10
+	default:
+		return 0
+	}
 }
 
 // rgbToHSL converts RGB (0-255) to HSL (h: 0-360, s/l: 0-1).

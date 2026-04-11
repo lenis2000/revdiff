@@ -13,33 +13,36 @@ import (
 	"github.com/umputun/revdiff/app/diff"
 	"github.com/umputun/revdiff/app/theme"
 	"github.com/umputun/revdiff/app/ui/mocks"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 func TestColorsFromTheme(t *testing.T) {
 	th := theme.Theme{
 		ChromaStyle: "dracula",
 		Colors: map[string]string{
-			"color-accent":      "#bd93f9",
-			"color-border":      "#6272a4",
-			"color-normal":      "#f8f8f2",
-			"color-muted":       "#6272a4",
-			"color-selected-fg": "#f8f8f2",
-			"color-selected-bg": "#44475a",
-			"color-annotation":  "#f1fa8c",
-			"color-cursor-fg":   "#282a36",
-			"color-cursor-bg":   "#f8f8f2",
-			"color-add-fg":      "#50fa7b",
-			"color-add-bg":      "#2a4a2a",
-			"color-remove-fg":   "#ff5555",
-			"color-remove-bg":   "#4a2a2a",
-			"color-modify-fg":   "#ffb86c",
-			"color-modify-bg":   "#3a3a2a",
-			"color-tree-bg":     "#21222c",
-			"color-diff-bg":     "#282a36",
-			"color-status-fg":   "#f8f8f2",
-			"color-status-bg":   "#44475a",
-			"color-search-fg":   "#282a36",
-			"color-search-bg":   "#f1fa8c",
+			"color-accent":         "#bd93f9",
+			"color-border":         "#6272a4",
+			"color-normal":         "#f8f8f2",
+			"color-muted":          "#6272a4",
+			"color-selected-fg":    "#f8f8f2",
+			"color-selected-bg":    "#44475a",
+			"color-annotation":     "#f1fa8c",
+			"color-cursor-fg":      "#282a36",
+			"color-cursor-bg":      "#f8f8f2",
+			"color-add-fg":         "#50fa7b",
+			"color-add-bg":         "#2a4a2a",
+			"color-remove-fg":      "#ff5555",
+			"color-remove-bg":      "#4a2a2a",
+			"color-word-add-bg":    "#3a5a3a",
+			"color-word-remove-bg": "#5a3a3a",
+			"color-modify-fg":      "#ffb86c",
+			"color-modify-bg":      "#3a3a2a",
+			"color-tree-bg":        "#21222c",
+			"color-diff-bg":        "#282a36",
+			"color-status-fg":      "#f8f8f2",
+			"color-status-bg":      "#44475a",
+			"color-search-fg":      "#282a36",
+			"color-search-bg":      "#f1fa8c",
 		},
 	}
 
@@ -49,6 +52,8 @@ func TestColorsFromTheme(t *testing.T) {
 	assert.Equal(t, "#f8f8f2", colors.Normal)
 	assert.Equal(t, "#50fa7b", colors.AddFg)
 	assert.Equal(t, "#282a36", colors.DiffBg)
+	assert.Equal(t, "#3a5a3a", colors.WordAddBg)
+	assert.Equal(t, "#5a3a3a", colors.WordRemoveBg)
 }
 
 func TestBuildThemeEntries(t *testing.T) {
@@ -121,6 +126,9 @@ func TestThemeSelectOverlay_renders(t *testing.T) {
 	m.width = 80
 	m.height = 24
 	m.themesDir = t.TempDir()
+	res := style.NewResolver(style.Colors{})
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
 	m.openThemeSelector()
 
 	overlay := m.themeSelectOverlay()
@@ -161,13 +169,6 @@ func TestApplyThemeFilter_caseInsensitive(t *testing.T) {
 	assert.Equal(t, "nord", m.themeSel.entries[0].name)
 }
 
-func TestHexColorToRGB(t *testing.T) {
-	assert.Equal(t, "189;147;249", hexColorToRGB("#bd93f9"))
-	assert.Equal(t, "0;0;0", hexColorToRGB("#000000"))
-	assert.Equal(t, "255;255;255", hexColorToRGB("#ffffff"))
-	assert.Equal(t, "255;255;255", hexColorToRGB("invalid"))
-}
-
 func TestFormatThemeEntry_accentSwatch(t *testing.T) {
 	m := testModel(nil, nil)
 	e := themeEntry{
@@ -194,12 +195,10 @@ func TestFormatThemeEntry_localDiamond(t *testing.T) {
 
 func TestFormatThemeEntry_selectedRestoresSelectedForegroundAfterSwatch(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = newStyles(Colors{
-		Normal:     "#d0d0d0",
-		Muted:      "#6272a4",
-		SelectedFg: "#f8f8f2",
-		SelectedBg: "#44475a",
-	})
+	tc := style.Colors{Normal: "#d0d0d0", Muted: "#6272a4", SelectedFg: "#f8f8f2", SelectedBg: "#44475a"}
+	res := style.NewResolver(tc)
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
 
 	e := themeEntry{
 		name:  "dracula",
@@ -226,13 +225,13 @@ func TestConfirmThemeSelect_noMatchesRestoresOriginalTheme(t *testing.T) {
 		StyleNameFunc: func() string { return currentStyle },
 	}
 
-	m := NewModel(renderer, annotation.NewStore(), highlighter, ModelConfig{TreeWidthRatio: 3})
+	m := testNewModel(t, renderer, annotation.NewStore(), highlighter, ModelConfig{TreeWidthRatio: 3})
 	m.width = 80
 	m.height = 24
 	m.ready = true
 	m.themesDir = t.TempDir()
 
-	origAccent := m.styles.colors.Accent
+	origAccent := m.resolver.Color(style.ColorKeyAccentFg)
 	m.openThemeSelector()
 
 	draculaIdx := -1
@@ -246,7 +245,7 @@ func TestConfirmThemeSelect_noMatchesRestoresOriginalTheme(t *testing.T) {
 
 	m.themeSel.cursor = draculaIdx
 	m.previewTheme()
-	require.NotEqual(t, origAccent, m.styles.colors.Accent, "preview should apply the highlighted theme")
+	require.NotEqual(t, origAccent, m.resolver.Color(style.ColorKeyAccentFg), "preview should apply the highlighted theme")
 	require.Equal(t, "dracula", currentStyle)
 
 	m.themeSel.filter = "no-match"
@@ -257,7 +256,7 @@ func TestConfirmThemeSelect_noMatchesRestoresOriginalTheme(t *testing.T) {
 
 	assert.False(t, updated.themeSel.active)
 	assert.Empty(t, updated.themeSel.filter)
-	assert.Equal(t, origAccent, updated.styles.colors.Accent)
+	assert.Equal(t, origAccent, updated.resolver.Color(style.ColorKeyAccentFg))
 	assert.Equal(t, "orig-style", currentStyle)
 }
 
@@ -272,7 +271,7 @@ func TestThemeSelectPreviewAndConfirmPreserveNoColors(t *testing.T) {
 		StyleNameFunc:      func() string { return "orig-style" },
 	}
 
-	m := NewModel(renderer, annotation.NewStore(), highlighter, ModelConfig{NoColors: true, TreeWidthRatio: 3})
+	m := testNewModel(t, renderer, annotation.NewStore(), highlighter, ModelConfig{NoColors: true, TreeWidthRatio: 3})
 	m.width = 80
 	m.height = 24
 	m.ready = true
@@ -290,14 +289,15 @@ func TestThemeSelectPreviewAndConfirmPreserveNoColors(t *testing.T) {
 
 	m.themeSel.cursor = draculaIdx
 	m.previewTheme()
-	assert.Equal(t, plainStyles().FileSelected.Render("x"), m.styles.FileSelected.Render("x"))
-	assert.Empty(t, m.styles.colors.Accent, "preview should stay monochrome")
+	plainRes := style.PlainResolver()
+	assert.Equal(t, plainRes.Style(style.StyleKeyFileSelected).Render("x"), m.resolver.Style(style.StyleKeyFileSelected).Render("x"))
+	assert.Empty(t, string(m.resolver.Color(style.ColorKeyAccentFg)), "preview should stay monochrome")
 
 	result, _ := m.confirmThemeSelect()
 	updated := result.(Model)
 
-	assert.Equal(t, plainStyles().FileSelected.Render("x"), updated.styles.FileSelected.Render("x"))
-	assert.Empty(t, updated.styles.colors.Accent, "confirm should stay monochrome")
+	assert.Equal(t, plainRes.Style(style.StyleKeyFileSelected).Render("x"), updated.resolver.Style(style.StyleKeyFileSelected).Render("x"))
+	assert.Empty(t, string(updated.resolver.Color(style.ColorKeyAccentFg)), "confirm should stay monochrome")
 	assert.Equal(t, "dracula", updated.activeThemeName)
 }
 
@@ -319,7 +319,7 @@ func TestApplyTheme_invalidChromaStyleKeepsPreviousHighlightingStyle(t *testing.
 		StyleNameFunc: func() string { return currentStyle },
 	}
 
-	m := NewModel(renderer, annotation.NewStore(), highlighter, ModelConfig{TreeWidthRatio: 3})
+	m := testNewModel(t, renderer, annotation.NewStore(), highlighter, ModelConfig{TreeWidthRatio: 3})
 	m.currFile = "main.go"
 	m.diffLines = []diff.DiffLine{{ChangeType: diff.ChangeContext, Content: "package main"}}
 	m.highlightedLines = []string{"existing"}

@@ -20,6 +20,7 @@ import (
 	"github.com/umputun/revdiff/app/keymap"
 	"github.com/umputun/revdiff/app/theme"
 	"github.com/umputun/revdiff/app/ui"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 type options struct {
@@ -382,9 +383,49 @@ func run(opts options) error {
 		}
 	}
 
-	model := ui.NewModel(renderer, store, hl, ui.ModelConfig{
-		Keymap:           km,
+	// construct the three style types per D15: Resolver first, Renderer from Resolver, SGR is zero-value
+	styleColors := style.Colors{
+		Accent:       opts.Colors.Accent,
+		Border:       opts.Colors.Border,
+		Normal:       opts.Colors.Normal,
+		Muted:        opts.Colors.Muted,
+		SelectedFg:   opts.Colors.SelectedFg,
+		SelectedBg:   opts.Colors.SelectedBg,
+		Annotation:   opts.Colors.Annotation,
+		CursorFg:     opts.Colors.CursorFg,
+		CursorBg:     opts.Colors.CursorBg,
+		AddFg:        opts.Colors.AddFg,
+		AddBg:        opts.Colors.AddBg,
+		RemoveFg:     opts.Colors.RemoveFg,
+		RemoveBg:     opts.Colors.RemoveBg,
+		WordAddBg:    opts.Colors.WordAddBg,
+		WordRemoveBg: opts.Colors.WordRemoveBg,
+		ModifyFg:     opts.Colors.ModifyFg,
+		ModifyBg:     opts.Colors.ModifyBg,
+		TreeBg:       opts.Colors.TreeBg,
+		DiffBg:       opts.Colors.DiffBg,
+		StatusFg:     opts.Colors.StatusFg,
+		StatusBg:     opts.Colors.StatusBg,
+		SearchFg:     opts.Colors.SearchFg,
+		SearchBg:     opts.Colors.SearchBg,
+	}
+	var res style.Resolver
+	if opts.NoColors {
+		res = style.PlainResolver()
+	} else {
+		res = style.NewResolver(styleColors)
+	}
+
+	model, err := ui.NewModel(ui.ModelConfig{
+		Renderer:         renderer,
+		Store:            store,
+		Highlighter:      hl,
+		StyleResolver:    res,
+		StyleRenderer:    style.NewRenderer(res),
+		SGR:              style.SGR{},
 		Blamer:           blamer,
+		LoadUntracked:    untrackedFn,
+		Keymap:           km,
 		NoColors:         opts.NoColors,
 		NoStatusBar:      opts.NoStatusBar,
 		NoConfirmDiscard: opts.NoConfirmDiscard,
@@ -400,36 +441,13 @@ func run(opts options) error {
 		TreeWidthRatio:   opts.TreeWidth,
 		Only:             opts.Only,
 		WorkDir:          workDir,
-		LoadUntracked:    untrackedFn,
 		ThemesDir:        defaultThemesDir(),
 		ConfigPath:       resolveFlagPath(os.Args[1:], "config", "REVDIFF_CONFIG", defaultConfigPath),
 		ActiveThemeName:  theme.ActiveName(opts.Theme),
-		Colors: ui.Colors{
-			Accent:       opts.Colors.Accent,
-			Border:       opts.Colors.Border,
-			Normal:       opts.Colors.Normal,
-			Muted:        opts.Colors.Muted,
-			SelectedFg:   opts.Colors.SelectedFg,
-			SelectedBg:   opts.Colors.SelectedBg,
-			Annotation:   opts.Colors.Annotation,
-			CursorFg:     opts.Colors.CursorFg,
-			CursorBg:     opts.Colors.CursorBg,
-			AddFg:        opts.Colors.AddFg,
-			AddBg:        opts.Colors.AddBg,
-			RemoveFg:     opts.Colors.RemoveFg,
-			RemoveBg:     opts.Colors.RemoveBg,
-			WordAddBg:    opts.Colors.WordAddBg,
-			WordRemoveBg: opts.Colors.WordRemoveBg,
-			ModifyFg:     opts.Colors.ModifyFg,
-			ModifyBg:     opts.Colors.ModifyBg,
-			TreeBg:       opts.Colors.TreeBg,
-			DiffBg:       opts.Colors.DiffBg,
-			StatusFg:     opts.Colors.StatusFg,
-			StatusBg:     opts.Colors.StatusBg,
-			SearchFg:     opts.Colors.SearchFg,
-			SearchBg:     opts.Colors.SearchBg,
-		},
 	})
+	if err != nil {
+		return fmt.Errorf("create model: %w", err)
+	}
 
 	p := tea.NewProgram(model, programOptions...)
 	finalModel, err := p.Run()

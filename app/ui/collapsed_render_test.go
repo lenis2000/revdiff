@@ -9,11 +9,15 @@ import (
 
 	"github.com/umputun/revdiff/app/annotation"
 	"github.com/umputun/revdiff/app/diff"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 func TestModel_CollapsedRenderHidesRemovedLines(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -32,7 +36,10 @@ func TestModel_CollapsedRenderHidesRemovedLines(t *testing.T) {
 
 func TestModel_CollapsedRenderModifiedVsPureAdd(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -55,7 +62,10 @@ func TestModel_CollapsedRenderModifiedVsPureAdd(t *testing.T) {
 
 func TestModel_CollapsedRenderExpandedHunkShowsAllLines(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.diffLines = []diff.DiffLine{
 		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
@@ -76,7 +86,10 @@ func TestModel_CollapsedRenderExpandedHunkShowsAllLines(t *testing.T) {
 
 func TestModel_CollapsedRenderAnnotationsOnRemovedLinesHidden(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.currFile = "a.go"
@@ -95,7 +108,10 @@ func TestModel_CollapsedRenderAnnotationsOnRemovedLinesHidden(t *testing.T) {
 
 func TestModel_CollapsedRenderAnnotationsVisibleWhenHunkExpanded(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.currFile = "a.go"
 	m.diffLines = []diff.DiffLine{
@@ -122,7 +138,10 @@ func TestModel_CollapsedRenderEmptyDiffLines(t *testing.T) {
 
 func TestModel_CollapsedRenderDividerOnlyLines(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -137,7 +156,10 @@ func TestModel_CollapsedRenderDividerOnlyLines(t *testing.T) {
 
 func TestModel_CollapsedRenderAllRemovesShowsPlaceholder(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -153,7 +175,10 @@ func TestModel_CollapsedRenderAllRemovesShowsPlaceholder(t *testing.T) {
 
 func TestModel_CollapsedRenderDeleteOnlyHunkInMixedFile(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -174,7 +199,10 @@ func TestModel_CollapsedRenderDeleteOnlyHunkInMixedFile(t *testing.T) {
 
 func TestModel_CollapsedRenderMultipleExpandedHunks(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.diffLines = []diff.DiffLine{
 		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
@@ -197,7 +225,10 @@ func TestModel_CollapsedRenderMultipleExpandedHunks(t *testing.T) {
 
 func TestModel_CollapsedRenderMixedExpandedAndCollapsedHunks(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.diffLines = []diff.DiffLine{
 		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
@@ -219,7 +250,10 @@ func TestModel_CollapsedRenderMixedExpandedAndCollapsedHunks(t *testing.T) {
 
 func TestModel_CollapsedWrapAddLine(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.wrapMode = true
@@ -240,7 +274,10 @@ func TestModel_CollapsedWrapAddLine(t *testing.T) {
 
 func TestModel_CollapsedWrapPureAddLine(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.wrapMode = true
@@ -260,7 +297,10 @@ func TestModel_CollapsedWrapPureAddLine(t *testing.T) {
 func TestModel_CollapsedWrapDeletePlaceholder(t *testing.T) {
 	t.Run("wrapping", func(t *testing.T) {
 		m := testModel(nil, nil)
-		m.styles = plainStyles()
+		res := style.PlainResolver()
+		m.resolver = res
+		m.renderer = style.NewRenderer(res)
+		m.sgr = style.SGR{}
 		m.collapsed.enabled = true
 		m.collapsed.expandedHunks = make(map[int]bool)
 		m.wrapMode = true
@@ -280,7 +320,10 @@ func TestModel_CollapsedWrapDeletePlaceholder(t *testing.T) {
 
 	t.Run("no wrapping needed", func(t *testing.T) {
 		m := testModel(nil, nil)
-		m.styles = plainStyles()
+		res := style.PlainResolver()
+		m.resolver = res
+		m.renderer = style.NewRenderer(res)
+		m.sgr = style.SGR{}
 		m.collapsed.enabled = true
 		m.collapsed.expandedHunks = make(map[int]bool)
 		m.wrapMode = true
@@ -299,7 +342,10 @@ func TestModel_CollapsedWrapDeletePlaceholder(t *testing.T) {
 
 	t.Run("singular line deleted", func(t *testing.T) {
 		m := testModel(nil, nil)
-		m.styles = plainStyles()
+		res := style.PlainResolver()
+		m.resolver = res
+		m.renderer = style.NewRenderer(res)
+		m.sgr = style.SGR{}
 		m.collapsed.enabled = true
 		m.collapsed.expandedHunks = make(map[int]bool)
 		m.wrapMode = true
@@ -317,7 +363,10 @@ func TestModel_CollapsedWrapDeletePlaceholder(t *testing.T) {
 
 func TestModel_CollapsedWrapShortLinesUnchanged(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.wrapMode = true
@@ -336,7 +385,10 @@ func TestModel_CollapsedWrapShortLinesUnchanged(t *testing.T) {
 
 func TestModel_CollapsedWrapNoScrollX(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.wrapMode = true
@@ -355,7 +407,10 @@ func TestModel_CollapsedWrapNoScrollX(t *testing.T) {
 
 func TestModel_CollapsedWrapCursorOnFirstLine(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.wrapMode = true
@@ -382,7 +437,10 @@ func TestModel_CollapsedWrapCursorOnFirstLine(t *testing.T) {
 
 func TestModel_CollapsedWrapExpandedHunkUsesStandardWrap(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.wrapMode = true
 	m.width = 50
@@ -423,7 +481,10 @@ func TestModel_CollapsedRenderWithLineNumbers(t *testing.T) {
 
 func TestModel_CollapsedDeleteOnlyPlaceholderHidesAnnotations(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.currFile = "a.go"
@@ -447,7 +508,10 @@ func TestModel_CollapsedDeleteOnlyPlaceholderHidesAnnotations(t *testing.T) {
 
 func TestModel_CollapsedExpandDeleteOnlyHunkWithDot(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = true
 	m.collapsed.expandedHunks = make(map[int]bool)
 	m.diffLines = []diff.DiffLine{
@@ -476,7 +540,10 @@ func TestModel_CollapsedExpandDeleteOnlyHunkWithDot(t *testing.T) {
 
 func TestModel_ExpandedModeUnchangedRegression(t *testing.T) {
 	m := testModel(nil, nil)
-	m.styles = plainStyles()
+	res := style.PlainResolver()
+	m.resolver = res
+	m.renderer = style.NewRenderer(res)
+	m.sgr = style.SGR{}
 	m.collapsed.enabled = false
 	m.diffLines = []diff.DiffLine{
 		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
