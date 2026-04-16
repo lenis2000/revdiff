@@ -16,13 +16,13 @@ import (
 // the file-listing strategy is pluggable so git, jj, or any future VCS can plug in.
 type DirectoryReader struct {
 	workDir    string
-	listSource string               // human label used in error messages ("git ls-files", "jj file list")
+	listSource string // human label used in error messages ("git ls-files", "jj file list")
 	listFiles  func() ([]byte, error)
 	splitSep   byte // separator between entries in the listFiles output (NUL or newline)
 }
 
-// NewDirectoryReader creates a DirectoryReader rooted at the given working directory.
-// the directory must be inside a git repository.
+// NewDirectoryReader creates a DirectoryReader backed by `git ls-files`.
+// The directory must be inside a git repository. Use NewJjDirectoryReader for jj repos.
 func NewDirectoryReader(workDir string) *DirectoryReader {
 	dr := &DirectoryReader{
 		workDir:    workDir,

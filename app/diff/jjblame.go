@@ -30,8 +30,10 @@ func (j *Jj) FileBlame(ref, file string, _ bool) (map[int]BlameLine, error) {
 }
 
 // blameTargetRef picks the revision to blame at.
-// Unlike git, jj can't implicitly blame the working copy — we always need to name
-// a revision. Empty and single-sided ranges fall back to "@" (working copy).
+// For fully specified ".." and "..." ranges, blame uses the right-hand side.
+// For a plain non-empty ref, that ref is translated and returned directly.
+// Empty refs and single-sided ranges ("..rev" / "rev.." / "...rev" / "rev...")
+// return "", which causes FileBlame to omit "-r" so jj defaults to the working copy (@).
 func (j *Jj) blameTargetRef(ref string) string {
 	// check triple-dot first so "A...B" isn't mis-split on ".."
 	if left, right, ok := strings.Cut(ref, "..."); ok {
@@ -57,8 +59,9 @@ func (j *Jj) blameTargetRef(ref string) string {
 //
 //	change_id\tauthor\tepoch\tcontent
 //
-// content ends with \n (except possibly the final line). We rely on a 5-way
-// Split (max 4 separators) so embedded tabs in content don't confuse us.
+// content ends with \n (except possibly the final line). We rely on a 4-way
+// SplitN (max 3 separators), leaving the remainder in parts[3] so embedded tabs
+// in content don't confuse us.
 func (j *Jj) parseAnnotate(raw string) (map[int]BlameLine, error) {
 	result := make(map[int]BlameLine)
 	// strip exactly one trailing newline so we don't produce a spurious final empty row
