@@ -12,6 +12,12 @@ build:
 	go build -ldflags "-X main.revision=$(REV) -s -w" -o .bin/revdiff.$(BRANCH) ./app
 	cp .bin/revdiff.$(BRANCH) .bin/revdiff
 
+install: build
+	@dest=$${REVDIFF_INSTALL_DIR:-$$HOME/bin}; \
+	mkdir -p $$dest; \
+	install -m 0755 .bin/revdiff $$dest/revdiff; \
+	echo "installed revdiff $(REV) to $$dest/revdiff"
+
 test:
 	go clean -testcache
 	go test -race -coverprofile=coverage.out ./...
@@ -38,4 +44,4 @@ site:
 validate-themes:
 	go test -run TestGalleryThemes_validate ./app/theme/
 
-.PHONY: build test lint fmt race version site validate-themes
+.PHONY: build install test lint fmt race version site validate-themes
