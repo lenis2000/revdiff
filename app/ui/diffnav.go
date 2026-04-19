@@ -93,81 +93,77 @@ func (m *Model) moveDiffCursorUp() {
 }
 
 // moveDiffCursorPageDown moves the diff cursor down by one visual page.
-// accounts for divider lines and annotation rows that occupy rendered space.
-// scrolls the viewport so cursor appears near the top of the new page.
+// keeps the cursor's relative screen position stable by scrolling both
+// cursor and viewport by the same amount.
 func (m *Model) moveDiffCursorPageDown() {
-	startY := m.cursorViewportY()
-	for {
-		prev := m.nav.diffCursor
-		m.moveDiffCursorDown()
-		if m.nav.diffCursor == prev {
-			break
-		}
-		if m.cursorViewportY()-startY >= m.layout.viewport.Height {
-			break
-		}
-	}
-	// place cursor at the top of the viewport for a true page-scroll feel
-	m.layout.viewport.SetYOffset(m.cursorViewportY())
-	m.layout.viewport.SetContent(m.renderDiff())
+	m.moveDiffCursorDownBy(m.layout.viewport.Height)
 }
 
 // moveDiffCursorPageUp moves the diff cursor up by one visual page.
-// accounts for divider lines and annotation rows that occupy rendered space.
-// scrolls the viewport so cursor appears near the bottom of the new page.
+// keeps the cursor's relative screen position stable by scrolling both
+// cursor and viewport by the same amount.
 func (m *Model) moveDiffCursorPageUp() {
-	startY := m.cursorViewportY()
-	for {
-		prev := m.nav.diffCursor
-		m.moveDiffCursorUp()
-		if m.nav.diffCursor == prev {
-			break
-		}
-		if startY-m.cursorViewportY() >= m.layout.viewport.Height {
-			break
-		}
-	}
-	// place cursor at the bottom of the viewport for a true page-scroll feel
-	m.layout.viewport.SetYOffset(max(0, m.cursorViewportY()-m.layout.viewport.Height+1))
-	m.layout.viewport.SetContent(m.renderDiff())
+	m.moveDiffCursorUpBy(m.layout.viewport.Height)
 }
 
 // moveDiffCursorHalfPageDown moves the diff cursor down by half a visual page.
 // scrolls viewport by half page explicitly, matching vim/less ctrl+d behavior.
 func (m *Model) moveDiffCursorHalfPageDown() {
-	halfPage := max(1, m.layout.viewport.Height/2)
-	startY := m.cursorViewportY()
-	for {
-		prev := m.nav.diffCursor
-		m.moveDiffCursorDown()
-		if m.nav.diffCursor == prev {
-			break
-		}
-		if m.cursorViewportY()-startY >= halfPage {
-			break
-		}
-	}
-	maxOffset := max(0, m.layout.viewport.TotalLineCount()-m.layout.viewport.Height)
-	m.layout.viewport.SetYOffset(min(m.layout.viewport.YOffset+halfPage, maxOffset))
-	m.layout.viewport.SetContent(m.renderDiff())
+	m.moveDiffCursorDownBy(max(1, m.layout.viewport.Height/2))
 }
 
 // moveDiffCursorHalfPageUp moves the diff cursor up by half a visual page.
 // scrolls viewport by half page explicitly, matching vim/less ctrl+u behavior.
 func (m *Model) moveDiffCursorHalfPageUp() {
-	halfPage := max(1, m.layout.viewport.Height/2)
+	m.moveDiffCursorUpBy(max(1, m.layout.viewport.Height/2))
+}
+
+// moveDiffCursorDownBy advances the cursor down by up to rows visual rows
+// and scrolls the viewport by the cursor's actual visual delta so the on-screen
+// row stays stable and the cursor never drops below the viewport.
+// accounts for divider lines, wrap continuations, and annotation rows that occupy rendered space.
+// transitions onto an annotation sub-row (cursorOnAnnotation flip with no diffCursor change)
+// count as real progress so the loop does not terminate early on annotated lines.
+func (m *Model) moveDiffCursorDownBy(rows int) {
 	startY := m.cursorViewportY()
 	for {
-		prev := m.nav.diffCursor
-		m.moveDiffCursorUp()
-		if m.nav.diffCursor == prev {
-			break
+		prevCursor := m.nav.diffCursor
+		prevAnnot := m.annot.cursorOnAnnotation
+		m.moveDiffCursorDown()
+		if m.nav.diffCursor == prevCursor && m.annot.cursorOnAnnotation == prevAnnot {
+			break // no more movement possible (end of content)
 		}
-		if startY-m.cursorViewportY() >= halfPage {
+		if m.cursorViewportY()-startY >= rows {
 			break
 		}
 	}
-	m.layout.viewport.SetYOffset(max(0, m.layout.viewport.YOffset-halfPage))
+	actualDelta := m.cursorViewportY() - startY
+	maxOffset := max(0, m.layout.viewport.TotalLineCount()-m.layout.viewport.Height)
+	m.layout.viewport.SetYOffset(min(m.layout.viewport.YOffset+actualDelta, maxOffset))
+	m.layout.viewport.SetContent(m.renderDiff())
+}
+
+// moveDiffCursorUpBy moves the cursor up by up to rows visual rows
+// and scrolls the viewport by the cursor's actual visual delta so the on-screen
+// row stays stable and the cursor never rises above the viewport.
+// accounts for divider lines, wrap continuations, and annotation rows that occupy rendered space.
+// transitions off an annotation sub-row count as real progress so the loop does not
+// terminate early on annotated lines.
+func (m *Model) moveDiffCursorUpBy(rows int) {
+	startY := m.cursorViewportY()
+	for {
+		prevCursor := m.nav.diffCursor
+		prevAnnot := m.annot.cursorOnAnnotation
+		m.moveDiffCursorUp()
+		if m.nav.diffCursor == prevCursor && m.annot.cursorOnAnnotation == prevAnnot {
+			break // no more movement possible (start of content)
+		}
+		if startY-m.cursorViewportY() >= rows {
+			break
+		}
+	}
+	actualDelta := startY - m.cursorViewportY()
+	m.layout.viewport.SetYOffset(max(0, m.layout.viewport.YOffset-actualDelta))
 	m.layout.viewport.SetContent(m.renderDiff())
 }
 
