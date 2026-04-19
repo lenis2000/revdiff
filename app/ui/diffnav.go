@@ -284,6 +284,15 @@ func (m *Model) topAlignViewportOnCursor() {
 	m.layout.viewport.SetContent(m.renderDiff())
 }
 
+// bottomAlignViewportOnCursor scrolls the viewport so the cursor sits on the
+// last visible row. Used by the vim `zb` chord. When viewport height is 1,
+// this is equivalent to top-align (cursor row = first/last row).
+func (m *Model) bottomAlignViewportOnCursor() {
+	cursorY := m.cursorViewportY()
+	m.layout.viewport.SetYOffset(max(0, cursorY-m.layout.viewport.Height+1))
+	m.layout.viewport.SetContent(m.renderDiff())
+}
+
 // findHunks scans diffLines and returns a slice of hunk start indices.
 // a hunk is a contiguous group of added/removed lines. the returned index
 // is the first line of each such group.

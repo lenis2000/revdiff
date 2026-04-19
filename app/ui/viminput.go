@@ -101,6 +101,24 @@ func (m Model) handleVimChordSecondKey(msg tea.KeyMsg) (handled bool, model Mode
 			m.clearVimPrefix()
 			return m.dispatchVimGotoStart()
 		}
+	case "z":
+		// viewport-alignment chords are diff-pane only; no-op outside.
+		if m.layout.focus == paneDiff {
+			switch keyRune {
+			case 'z':
+				m.clearVimPrefix()
+				m.centerViewportOnCursor()
+				return true, m, nil
+			case 't':
+				m.clearVimPrefix()
+				m.topAlignViewportOnCursor()
+				return true, m, nil
+			case 'b':
+				m.clearVimPrefix()
+				m.bottomAlignViewportOnCursor()
+				return true, m, nil
+			}
+		}
 	}
 
 	// chord did not complete: clear chord (count preserved) and fall through.

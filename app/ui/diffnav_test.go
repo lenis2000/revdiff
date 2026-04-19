@@ -2736,6 +2736,83 @@ func TestModel_VimCount_PageDown3(t *testing.T) {
 	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
 }
 
+func TestModel_VimChord_ZZ_CentersViewport(t *testing.T) {
+	lines := makeContextFile(50)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.layout.viewport.Height = 10
+	model.nav.diffCursor = 25
+	model.layout.viewport.SetYOffset(0) // cursor offscreen below
+
+	result, _ = model.Update(keyMsg('z'))
+	model = result.(Model)
+	assert.Equal(t, "z", model.vim.pendingChord)
+	result, _ = model.Update(keyMsg('z'))
+	model = result.(Model)
+	assert.Equal(t, "", model.vim.pendingChord)
+	// after centering, cursor should be near the middle of viewport
+	cursorY := model.cursorViewportY()
+	relative := cursorY - model.layout.viewport.YOffset
+	assert.InDelta(t, model.layout.viewport.Height/2, relative, 1, "cursor should be ~middle of viewport")
+}
+
+func TestModel_VimChord_ZT_TopAlignsCursor(t *testing.T) {
+	lines := makeContextFile(50)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.layout.viewport.Height = 10
+	model.nav.diffCursor = 30
+
+	result, _ = model.Update(keyMsg('z'))
+	model = result.(Model)
+	result, _ = model.Update(keyMsg('t'))
+	model = result.(Model)
+	assert.Equal(t, model.cursorViewportY(), model.layout.viewport.YOffset, "cursor at top of viewport")
+}
+
+func TestModel_VimChord_ZB_BottomAlignsCursor(t *testing.T) {
+	lines := makeContextFile(50)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.layout.viewport.Height = 10
+	model.nav.diffCursor = 30
+
+	result, _ = model.Update(keyMsg('z'))
+	model = result.(Model)
+	result, _ = model.Update(keyMsg('b'))
+	model = result.(Model)
+	cursorY := model.cursorViewportY()
+	expectedOffset := cursorY - model.layout.viewport.Height + 1
+	assert.Equal(t, expectedOffset, model.layout.viewport.YOffset, "cursor at bottom of viewport")
+}
+
+func TestModel_VimChord_Z_ReDispatch(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+
+	result, _ = model.Update(keyMsg('z'))
+	model = result.(Model)
+	assert.Equal(t, "z", model.vim.pendingChord)
+	// 'j' is not a z-chord completer; chord should clear and j should still move down
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, "", model.vim.pendingChord)
+	assert.Equal(t, 1, model.nav.diffCursor, "j after z should still move down")
+}
+
 func TestModel_VimChord_GG_GoesToTop(t *testing.T) {
 	lines := makeContextFile(20)
 	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
