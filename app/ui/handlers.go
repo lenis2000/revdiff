@@ -66,7 +66,28 @@ func (m Model) buildHelpSpec() overlay.HelpSpec {
 			result = append(result, m.buildTOCHelpSection())
 		}
 	}
+	result = append(result, vimHelpSection())
 	return overlay.HelpSpec{Sections: result}
+}
+
+// vimHelpSection returns the static Vim-style controls section appended to the
+// help overlay. Chord entries (gg, zz, ctrl+w h, ...) have no keymap.Action
+// because they are unconfigurable, so the section is hand-built rather than
+// derived from the keymap.
+func vimHelpSection() overlay.HelpSection {
+	return overlay.HelpSection{
+		Title: "Vim",
+		Entries: []overlay.HelpEntry{
+			{Keys: "N", Description: "count prefix: repeat the next motion N times (5j, 3], 10k)"},
+			{Keys: "gg", Description: "jump to file top"},
+			{Keys: "G", Description: "jump to file bottom"},
+			{Keys: "zz / zt / zb", Description: "center / top-align / bottom-align cursor in viewport"},
+			{Keys: "{ / }", Description: "previous / next hunk (aliases for [ / ])"},
+			{Keys: "Ctrl+W h/k", Description: "focus tree pane"},
+			{Keys: "Ctrl+W l/j", Description: "focus diff pane"},
+			{Keys: "Ctrl+W w", Description: "toggle pane focus"},
+		},
+	}
 }
 
 // buildTOCHelpSection returns the Markdown TOC contextual help section.

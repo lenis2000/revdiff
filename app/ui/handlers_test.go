@@ -771,3 +771,27 @@ func TestModel_ToggleCompactMode_CursorResetsAfterReload(t *testing.T) {
 	// after skipInitialDividers, cursor should skip index 0 (divider) and land on 1
 	assert.Equal(t, 1, model.nav.diffCursor, "cursor must reset to first non-divider line after compact re-fetch")
 }
+
+func TestBuildHelpSpec_VimSection(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	spec := m.buildHelpSpec()
+
+	var vim *overlay.HelpSection
+	for i := range spec.Sections {
+		if spec.Sections[i].Title == "Vim" {
+			vim = &spec.Sections[i]
+			break
+		}
+	}
+	require.NotNil(t, vim, "buildHelpSpec must include a Vim section")
+
+	gotKeys := make(map[string]string)
+	for _, e := range vim.Entries {
+		gotKeys[e.Keys] = e.Description
+	}
+	wantKeys := []string{"N", "gg", "G", "zz / zt / zb", "{ / }", "Ctrl+W h/k", "Ctrl+W l/j", "Ctrl+W w"}
+	for _, k := range wantKeys {
+		_, ok := gotKeys[k]
+		assert.True(t, ok, "Vim section should document %q", k)
+	}
+}
