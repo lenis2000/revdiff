@@ -30,7 +30,7 @@ func TestDefault_allExpectedBindings(t *testing.T) {
 		{"home", ActionHome}, {"end", ActionEnd}, {"G", ActionEnd},
 		{"left", ActionScrollLeft}, {"right", ActionScrollRight},
 		{"n", ActionNextItem}, {"N", ActionPrevItem}, {"p", ActionPrevItem},
-		{"]", ActionNextHunk}, {"[", ActionPrevHunk},
+		{"]", ActionNextHunk}, {"[", ActionPrevHunk}, {"}", ActionNextHunk}, {"{", ActionPrevHunk},
 		{"tab", ActionTogglePane}, {"h", ActionFocusTree}, {"l", ActionFocusDiff},
 		{"/", ActionSearch},
 		{"a", ActionConfirm}, {"enter", ActionConfirm},

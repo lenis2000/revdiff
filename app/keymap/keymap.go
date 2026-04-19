@@ -192,6 +192,8 @@ func defaultBindings() map[string]Action {
 		"p":      ActionPrevItem,
 		"]":      ActionNextHunk,
 		"[":      ActionPrevHunk,
+		"}":      ActionNextHunk,
+		"{":      ActionPrevHunk,
 		"tab":    ActionTogglePane,
 		"h":      ActionFocusTree,
 		"l":      ActionFocusDiff,
