@@ -352,6 +352,13 @@ type annotationState struct {
 	existingMultiline string
 }
 
+// inputState holds transient keyboard-input state for vim-style prefixes.
+// Both fields clear on completion, Esc, or on entering a modal.
+type inputState struct {
+	pendingCount int    // accumulated count prefix, 0 = none
+	pendingChord string // "" | "g" | "z" | "ctrl+w"
+}
+
 // Model is the top-level bubbletea model for revdiff.
 type Model struct {
 	// injected dependencies
@@ -381,6 +388,7 @@ type Model struct {
 	commits     commitsState      // eagerly loaded commit log for the commit-info overlay
 	reload      reloadState       // pending-confirmation state and applicability for R reload
 	compact     compactState      // applicability + transient hint for compact diff mode
+	vim         inputState        // transient keyboard-input state for vim-style prefixes
 
 	ready        bool   // true after first WindowSizeMsg
 	filesLoaded  bool   // true after the first filesLoadedMsg is handled (keeps the loading view pinned until real data arrives)
