@@ -722,6 +722,26 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return model, cmd
 	}
 
+	// vim-style prefix accumulation (digit count, chord state).
+	// when handled, the key was absorbed (or completed a chord) — return early.
+	if handled, model, cmd := m.consumeVimPrefix(msg); handled {
+		return model, cmd
+	}
+	// vim prefix not handled: dispatch normally, then clear any leftover count
+	// so a non-motion key after a count silently discards the count (vim parity).
+	result, cmd := m.dispatchKey(msg)
+	if rm, ok := result.(Model); ok {
+		rm.clearVimPrefix()
+		return rm, cmd
+	}
+	return result, cmd
+}
+
+// dispatchKey runs the per-action dispatch table after vim-prefix and modal
+// short-circuits have been resolved. Extracted from handleKey so the wrapper
+// can clear leftover vim-prefix state on the returned model regardless of
+// which dispatch branch executed.
+func (m Model) dispatchKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	action := m.keymap.Resolve(msg.String())
 
 	if model, ok := m.handleOverlayOpen(action); ok {
