@@ -152,3 +152,39 @@ func TestConsumeVimPrefix_GChord_NonGSecondKey_ClearsAndFallsThrough(t *testing.
 	assert.Equal(t, "", m2.vim.pendingChord)
 	assert.Equal(t, 5, m2.vim.pendingCount, "count must survive chord clear")
 }
+
+func TestVimPendingSegment_Empty(t *testing.T) {
+	m := Model{}
+	m.cfg.noColors = true
+	assert.Empty(t, m.vimPendingSegment())
+}
+
+func TestVimPendingSegment_CountOnly(t *testing.T) {
+	m := Model{}
+	m.cfg.noColors = true
+	m.vim.pendingCount = 5
+	assert.Equal(t, "5", m.vimPendingSegment())
+}
+
+func TestVimPendingSegment_ChordOnly_G(t *testing.T) {
+	m := Model{}
+	m.cfg.noColors = true
+	m.vim.pendingChord = "g"
+	assert.Equal(t, "g", m.vimPendingSegment())
+}
+
+func TestVimPendingSegment_ChordOnly_CtrlW(t *testing.T) {
+	m := Model{}
+	m.cfg.noColors = true
+	m.vim.pendingChord = "ctrl+w"
+	assert.Equal(t, "^W", m.vimPendingSegment())
+}
+
+func TestVimPendingSegment_CountAndChord(t *testing.T) {
+	// reachable in theory if a future chord supports count; not in scope B today.
+	m := Model{}
+	m.cfg.noColors = true
+	m.vim.pendingCount = 5
+	m.vim.pendingChord = "z"
+	assert.Equal(t, "5z", m.vimPendingSegment())
+}

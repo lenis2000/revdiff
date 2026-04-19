@@ -1,9 +1,12 @@
 package ui
 
 import (
+	"strconv"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/umputun/revdiff/app/ui/sidepane"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 // vimCountCap saturates pendingCount to prevent runaway repetition (e.g. user
@@ -194,6 +197,39 @@ func digitFromKey(msg tea.KeyMsg) (int, bool) {
 		return 0, false
 	}
 	return int(r - '0'), true
+}
+
+// vimPendingSegment returns a status-bar segment for any in-flight vim prefix
+// (count or chord), or empty when nothing is pending. Rendered with the accent
+// foreground via raw ANSI so the status-bar background remains intact.
+func (m Model) vimPendingSegment() string {
+	if m.vim.pendingCount == 0 && m.vim.pendingChord == "" {
+		return ""
+	}
+	var s string
+	if m.vim.pendingCount > 0 {
+		s = strconv.Itoa(m.vim.pendingCount)
+	}
+	if m.vim.pendingChord != "" {
+		s += vimChordDisplay(m.vim.pendingChord)
+	}
+	if m.cfg.noColors {
+		return s
+	}
+	fg := m.resolver.Color(style.ColorKeyAccentFg)
+	if fg == "" {
+		return s
+	}
+	return style.AnsiFg(string(fg)) + s + "\033[39m"
+}
+
+// vimChordDisplay maps internal chord identifiers to user-facing names for the
+// status-bar pending indicator. "ctrl+w" renders as "^W" (vim convention).
+func vimChordDisplay(chord string) string {
+	if chord == "ctrl+w" {
+		return "^W"
+	}
+	return chord
 }
 
 // vimCount returns the effective count for a motion: the pending count when

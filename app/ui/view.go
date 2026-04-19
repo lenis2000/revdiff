@@ -157,6 +157,9 @@ func (m Model) statusBarText() string {
 
 	// build right-side segments
 	var rightParts []string
+	if vp := m.vimPendingSegment(); vp != "" {
+		rightParts = append(rightParts, vp)
+	}
 	if rc := m.tree.ReviewedCount(); rc > 0 {
 		rightParts = append(rightParts, fmt.Sprintf("✓ %d/%d", rc, m.tree.TotalFiles()))
 	}
