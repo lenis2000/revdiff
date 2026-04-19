@@ -369,17 +369,28 @@ func (m *Model) moveToPrevHunk() {
 // when cross-file hunk navigation is enabled, forward at the last hunk navigates to the next file
 // and lands on its first hunk, and backward at the first hunk navigates to the previous file and
 // lands on its last hunk.
+// vim-style count repeats the in-file jump that many times; if the count would
+// take the cursor past the last/first hunk, the remaining iterations are
+// dropped and (if cross-file enabled) a single cross-file jump occurs.
 // always shifts focus to the diff pane. no-op when no file is loaded.
 func (m Model) handleHunkNav(forward bool) (tea.Model, tea.Cmd) {
 	if m.file.name == "" {
 		return m, nil
 	}
 	m.layout.focus = paneDiff
+	count := vimCount(m.vim.pendingCount)
+	m.vim.pendingCount = 0
 	prevCursor := m.nav.diffCursor
-	if forward {
-		m.moveToNextHunk()
-	} else {
-		m.moveToPrevHunk()
+	for i := 0; i < count; i++ {
+		before := m.nav.diffCursor
+		if forward {
+			m.moveToNextHunk()
+		} else {
+			m.moveToPrevHunk()
+		}
+		if m.nav.diffCursor == before {
+			break // hit boundary; remaining count discarded
+		}
 	}
 	if m.nav.diffCursor != prevCursor || m.file.singleFile || !m.cfg.crossFileHunks {
 		m.syncTOCActiveSection()

@@ -2736,6 +2736,62 @@ func TestModel_VimCount_PageDown3(t *testing.T) {
 	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
 }
 
+func TestModel_VimCount_HunkNav3(t *testing.T) {
+	// 5 hunks separated by context lines.
+	lines := []diff.DiffLine{
+		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 2, Content: "h1", ChangeType: diff.ChangeAdd},
+		{NewNum: 3, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 4, Content: "h2", ChangeType: diff.ChangeAdd},
+		{NewNum: 5, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 6, Content: "h3", ChangeType: diff.ChangeAdd},
+		{NewNum: 7, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 8, Content: "h4", ChangeType: diff.ChangeAdd},
+		{NewNum: 9, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 10, Content: "h5", ChangeType: diff.ChangeAdd},
+	}
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+
+	startCursor := model.nav.diffCursor
+	result, _ = model.Update(keyMsg('3'))
+	model = result.(Model)
+	result, _ = model.Update(keyMsg(']'))
+	model = result.(Model)
+	// 3 forward hunk jumps. Each jump moves to the next ChangeAdd line; hunks
+	// in the test fixture are at indices 1, 3, 5, 7, 9. From cursor=0, three
+	// successive jumps land on indices 1, 3, 5.
+	assert.Equal(t, 5, model.nav.diffCursor, "3] should advance 3 hunks (start=%d)", startCursor)
+	assert.Equal(t, 0, model.vim.pendingCount)
+}
+
+func TestModel_VimCount_HunkNav_OvershootStops(t *testing.T) {
+	// 3 hunks; 99] should stop at last hunk, not hang.
+	lines := []diff.DiffLine{
+		{NewNum: 1, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 2, Content: "h1", ChangeType: diff.ChangeAdd},
+		{NewNum: 3, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 4, Content: "h2", ChangeType: diff.ChangeAdd},
+		{NewNum: 5, Content: "ctx", ChangeType: diff.ChangeContext},
+		{NewNum: 6, Content: "h3", ChangeType: diff.ChangeAdd},
+	}
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	for _, r := range []rune{'9', '9'} {
+		result, _ = model.Update(keyMsg(r))
+		model = result.(Model)
+	}
+	result, _ = model.Update(keyMsg(']'))
+	model = result.(Model)
+	assert.Equal(t, 5, model.nav.diffCursor, "should land on last hunk (index 5)")
+}
+
 func TestModel_VimCount_TreeNav3j(t *testing.T) {
 	files := []string{"a.go", "b.go", "c.go", "d.go", "e.go"}
 	diffs := map[string][]diff.DiffLine{}
