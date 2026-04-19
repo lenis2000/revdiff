@@ -2679,3 +2679,79 @@ func TestModel_VimCount_OvershootStopsAtEnd(t *testing.T) {
 	assert.Equal(t, len(lines)-1, model.nav.diffCursor, "must stop at last line, not hang")
 	assert.Equal(t, 0, model.vim.pendingCount)
 }
+
+func TestModel_VimCount_ScrollRight5(t *testing.T) {
+	lines := makeContextFile(5)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	assert.Equal(t, 0, model.layout.scrollX)
+
+	for _, r := range []rune{'5'} {
+		result, _ = model.Update(keyMsg(r))
+		model = result.(Model)
+	}
+	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model = result.(Model)
+	assert.Equal(t, 5*scrollStep, model.layout.scrollX, "5+right must scroll 5*scrollStep")
+}
+
+func TestModel_VimCount_ScrollLeft3FromOffset(t *testing.T) {
+	lines := makeContextFile(5)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.layout.scrollX = 5 * scrollStep
+
+	result, _ = model.Update(keyMsg('3'))
+	model = result.(Model)
+	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model = result.(Model)
+	assert.Equal(t, 2*scrollStep, model.layout.scrollX, "3+left must subtract 3*scrollStep")
+}
+
+func TestModel_VimCount_PageDown3(t *testing.T) {
+	// page motion uses a viewport-driven loop; verify cursor advances substantially.
+	lines := makeContextFile(200)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	m.layout.viewport.Height = 10 // smaller viewport for predictable paging
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	startCursor := model.nav.diffCursor
+
+	// 3 + page-down
+	for _, r := range []rune{'3'} {
+		result, _ = model.Update(keyMsg(r))
+		model = result.(Model)
+	}
+	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	model = result.(Model)
+	delta := model.nav.diffCursor - startCursor
+	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
+}
+
+func TestModel_VimCount_HalfPageDown2(t *testing.T) {
+	lines := makeContextFile(200)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	m.layout.viewport.Height = 10
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	startCursor := model.nav.diffCursor
+
+	for _, r := range []rune{'2'} {
+		result, _ = model.Update(keyMsg(r))
+		model = result.(Model)
+	}
+	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlD})
+	model = result.(Model)
+	delta := model.nav.diffCursor - startCursor
+	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height, "2 ctrl-d should move at least one full viewport height")
+}

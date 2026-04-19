@@ -406,16 +406,21 @@ func (m Model) handleHunkNav(forward bool) (tea.Model, tea.Cmd) {
 }
 
 // handleHorizontalScroll processes left/right scroll keys.
-// direction < 0 scrolls left, direction > 0 scrolls right.
+// magnitude < 0 scrolls left, magnitude > 0 scrolls right; the absolute value
+// is the number of scroll steps applied (so vim count `5l` translates to
+// magnitude=5 and scrolls 5*scrollStep characters).
 // no-op when wrap mode is active (content is already fully visible).
-func (m *Model) handleHorizontalScroll(direction int) {
+func (m *Model) handleHorizontalScroll(magnitude int) {
 	if m.modes.wrap {
 		return
 	}
-	if direction < 0 {
-		m.layout.scrollX = max(0, m.layout.scrollX-scrollStep)
-	} else {
-		m.layout.scrollX += scrollStep
+	switch {
+	case magnitude < 0:
+		m.layout.scrollX = max(0, m.layout.scrollX+magnitude*scrollStep)
+	case magnitude > 0:
+		m.layout.scrollX += magnitude * scrollStep
+	default:
+		return
 	}
 	m.layout.viewport.SetContent(m.renderDiff())
 }
@@ -429,10 +434,10 @@ func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case keymap.ActionFocusTree:
 		return m.handleSwitchToTree()
 	case keymap.ActionScrollLeft:
-		m.handleHorizontalScroll(-1)
+		m.handleHorizontalScroll(-count)
 		return m, nil
 	case keymap.ActionScrollRight:
-		m.handleHorizontalScroll(1)
+		m.handleHorizontalScroll(count)
 		return m, nil
 	case keymap.ActionDown:
 		m.repeatCursorMove(count, (*Model).moveDiffCursorDown)
@@ -441,13 +446,13 @@ func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.repeatCursorMove(count, (*Model).moveDiffCursorUp)
 		m.syncViewportToCursor()
 	case keymap.ActionPageDown:
-		m.moveDiffCursorPageDown()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorPageDown)
 	case keymap.ActionHalfPageDown:
-		m.moveDiffCursorHalfPageDown()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorHalfPageDown)
 	case keymap.ActionPageUp:
-		m.moveDiffCursorPageUp()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorPageUp)
 	case keymap.ActionHalfPageUp:
-		m.moveDiffCursorHalfPageUp()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorHalfPageUp)
 	case keymap.ActionHome:
 		m.moveDiffCursorToStart()
 	case keymap.ActionEnd:
