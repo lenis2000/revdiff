@@ -633,6 +633,21 @@ While the annotation input is active, press `Ctrl+E` to hand off the current tex
 | `q` | Quit, output annotations to stdout |
 | `Q` | Discard all annotations and quit (confirms if annotations exist) |
 
+**Vim-style controls:**
+
+| Key | Action |
+|-----|--------|
+| `N` (digit prefix) | Repeat the next motion N times (e.g. `5j`, `10k`, `3]`). Caps at 10000. Cleared by Esc or by any non-motion key. Pending count shows in the status bar. |
+| `gg` | Jump to file top (alias for `Home` in the diff pane; first file/TOC entry in the tree pane) |
+| `G` | Jump to file bottom (alias for `End`) |
+| `zz` / `zt` / `zb` | Center / top-align / bottom-align cursor in the diff viewport |
+| `{` / `}` | Previous / next hunk (aliases for `[` / `]`) |
+| `Ctrl+W h/k` | Focus tree pane |
+| `Ctrl+W l/j` | Focus diff pane |
+| `Ctrl+W w` | Toggle pane focus |
+
+Counts apply to: `j`/`k`, `Ctrl+d`/`Ctrl+u`, `PgDn`/`PgUp`, left/right scroll, `n`/`p`/`N` (file or search nav), and `[`/`]`/`{`/`}` (hunks). Counts on `G` and chord targets (`gg`, `zz`, `Ctrl+W h`) are ignored.
+
 ### Status Bar Icons
 
 The status bar shows a fixed row of mode indicators on the right side. All slots are always rendered — active modes use the status bar foreground color, inactive modes use muted gray, so the row occupies the same width regardless of what's toggled on.
