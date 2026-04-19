@@ -2736,6 +2736,60 @@ func TestModel_VimCount_PageDown3(t *testing.T) {
 	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
 }
 
+func TestModel_VimChord_GG_GoesToTop(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.nav.diffCursor = 15
+	assert.Equal(t, 15, model.nav.diffCursor)
+
+	result, _ = model.Update(keyMsg('g'))
+	model = result.(Model)
+	assert.Equal(t, "g", model.vim.pendingChord)
+
+	result, _ = model.Update(keyMsg('g'))
+	model = result.(Model)
+	assert.Equal(t, 0, model.nav.diffCursor, "gg should jump to top")
+	assert.Equal(t, "", model.vim.pendingChord, "chord must clear after completion")
+}
+
+func TestModel_VimChord_GG_TreePane_GoesToFirstFile(t *testing.T) {
+	files := []string{"a.go", "b.go", "c.go"}
+	diffs := map[string][]diff.DiffLine{}
+	for _, f := range files {
+		diffs[f] = []diff.DiffLine{{NewNum: 1, Content: f, ChangeType: diff.ChangeContext}}
+	}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneTree
+	m.tree.Move(sidepane.MotionDown)
+	m.tree.Move(sidepane.MotionDown)
+	assert.Equal(t, "c.go", m.tree.SelectedFile())
+
+	result, _ := m.Update(keyMsg('g'))
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('g'))
+	model = result.(Model)
+	assert.Equal(t, "a.go", model.tree.SelectedFile(), "gg in tree pane should select first file")
+}
+
+func TestModel_VimChord_G_GoesToEnd(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	assert.Equal(t, 0, model.nav.diffCursor)
+
+	result, _ = model.Update(keyMsg('G'))
+	model = result.(Model)
+	assert.Equal(t, len(lines)-1, model.nav.diffCursor, "G should jump to last line")
+}
+
 func TestModel_VimCount_FileNav2n(t *testing.T) {
 	files := []string{"a.go", "b.go", "c.go", "d.go", "e.go"}
 	diffs := map[string][]diff.DiffLine{}

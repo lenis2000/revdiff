@@ -131,3 +131,24 @@ func TestConsumeVimPrefix_NonDigitPreservesPendingCount(t *testing.T) {
 
 	assert.Equal(t, 5, m2.vim.pendingCount, "count must survive into dispatch path; caller clears after consuming")
 }
+
+func TestConsumeVimPrefix_GChordStart(t *testing.T) {
+	m := Model{overlay: overlay.NewManager()}
+
+	handled, m2, _ := m.consumeVimPrefix(keyMsg('g'))
+
+	assert.True(t, handled)
+	assert.Equal(t, "g", m2.vim.pendingChord)
+}
+
+func TestConsumeVimPrefix_GChord_NonGSecondKey_ClearsAndFallsThrough(t *testing.T) {
+	m := Model{overlay: overlay.NewManager()}
+	m.vim.pendingChord = "g"
+	m.vim.pendingCount = 5
+
+	handled, m2, _ := m.consumeVimPrefix(keyMsg('j'))
+
+	assert.False(t, handled, "g+j must clear chord and fall through")
+	assert.Equal(t, "", m2.vim.pendingChord)
+	assert.Equal(t, 5, m2.vim.pendingCount, "count must survive chord clear")
+}

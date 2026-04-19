@@ -27,7 +27,7 @@ func TestDefault_allExpectedBindings(t *testing.T) {
 		{"j", ActionDown}, {"k", ActionUp}, {"down", ActionDown}, {"up", ActionUp},
 		{"pgdown", ActionPageDown}, {"pgup", ActionPageUp},
 		{"ctrl+d", ActionHalfPageDown}, {"ctrl+u", ActionHalfPageUp},
-		{"home", ActionHome}, {"end", ActionEnd},
+		{"home", ActionHome}, {"end", ActionEnd}, {"G", ActionEnd},
 		{"left", ActionScrollLeft}, {"right", ActionScrollRight},
 		{"n", ActionNextItem}, {"N", ActionPrevItem}, {"p", ActionPrevItem},
 		{"]", ActionNextHunk}, {"[", ActionPrevHunk},

@@ -184,6 +184,7 @@ func defaultBindings() map[string]Action {
 		"ctrl+u": ActionHalfPageUp,
 		"home":   ActionHome,
 		"end":    ActionEnd,
+		"G":      ActionEnd,
 		"left":   ActionScrollLeft,
 		"right":  ActionScrollRight,
 		"n":      ActionNextItem,
