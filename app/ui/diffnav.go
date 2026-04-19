@@ -480,19 +480,21 @@ func (m Model) handleTreeNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 
 	action := m.keymap.Resolve(msg.String())
+	count := vimCount(m.vim.pendingCount)
+	m.vim.pendingCount = 0
 	switch action {
 	case keymap.ActionDown:
-		m.tree.Move(sidepane.MotionDown)
+		m.tree.Move(sidepane.MotionDown, count)
 	case keymap.ActionUp:
-		m.tree.Move(sidepane.MotionUp)
+		m.tree.Move(sidepane.MotionUp, count)
 	case keymap.ActionPageDown:
-		m.tree.Move(sidepane.MotionPageDown, m.treePageSize())
+		m.tree.Move(sidepane.MotionPageDown, count*m.treePageSize())
 	case keymap.ActionHalfPageDown:
-		m.tree.Move(sidepane.MotionPageDown, max(1, m.treePageSize()/2))
+		m.tree.Move(sidepane.MotionPageDown, count*max(1, m.treePageSize()/2))
 	case keymap.ActionPageUp:
-		m.tree.Move(sidepane.MotionPageUp, m.treePageSize())
+		m.tree.Move(sidepane.MotionPageUp, count*m.treePageSize())
 	case keymap.ActionHalfPageUp:
-		m.tree.Move(sidepane.MotionPageUp, max(1, m.treePageSize()/2))
+		m.tree.Move(sidepane.MotionPageUp, count*max(1, m.treePageSize()/2))
 	case keymap.ActionHome:
 		m.tree.Move(sidepane.MotionFirst)
 	case keymap.ActionEnd:
@@ -512,19 +514,21 @@ func (m Model) handleTreeNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // handleTOCNav handles navigation keys when the TOC pane is focused.
 func (m Model) handleTOCNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	action := m.keymap.Resolve(msg.String())
+	count := vimCount(m.vim.pendingCount)
+	m.vim.pendingCount = 0
 	switch action {
 	case keymap.ActionDown:
-		m.file.mdTOC.Move(sidepane.MotionDown)
+		m.file.mdTOC.Move(sidepane.MotionDown, count)
 	case keymap.ActionUp:
-		m.file.mdTOC.Move(sidepane.MotionUp)
+		m.file.mdTOC.Move(sidepane.MotionUp, count)
 	case keymap.ActionPageDown:
-		m.file.mdTOC.Move(sidepane.MotionPageDown, m.treePageSize())
+		m.file.mdTOC.Move(sidepane.MotionPageDown, count*m.treePageSize())
 	case keymap.ActionHalfPageDown:
-		m.file.mdTOC.Move(sidepane.MotionPageDown, max(1, m.treePageSize()/2))
+		m.file.mdTOC.Move(sidepane.MotionPageDown, count*max(1, m.treePageSize()/2))
 	case keymap.ActionPageUp:
-		m.file.mdTOC.Move(sidepane.MotionPageUp, m.treePageSize())
+		m.file.mdTOC.Move(sidepane.MotionPageUp, count*m.treePageSize())
 	case keymap.ActionHalfPageUp:
-		m.file.mdTOC.Move(sidepane.MotionPageUp, max(1, m.treePageSize()/2))
+		m.file.mdTOC.Move(sidepane.MotionPageUp, count*max(1, m.treePageSize()/2))
 	case keymap.ActionHome:
 		m.file.mdTOC.Move(sidepane.MotionFirst)
 	case keymap.ActionEnd:
