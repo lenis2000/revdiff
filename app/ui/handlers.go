@@ -241,11 +241,17 @@ func (m Model) handleFileOrSearchNav(forward bool) (tea.Model, tea.Cmd) {
 		if !forward {
 			stepDir = sidepane.DirectionPrev
 		}
-		for i := 0; i < count; i++ {
-			if !m.tree.HasFile(stepDir) {
-				break
-			}
+		// preserve historical wrap-around for plain n/p (count=1); count>1
+		// stops at the file-list boundary to match vim semantics.
+		if count == 1 {
 			m.tree.StepFile(stepDir)
+		} else {
+			for i := 0; i < count; i++ {
+				if !m.tree.HasFile(stepDir) {
+					break
+				}
+				m.tree.StepFile(stepDir)
+			}
 		}
 		return m.loadSelectedIfChanged()
 	}
