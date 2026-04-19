@@ -119,6 +119,32 @@ func (m Model) handleVimChordSecondKey(msg tea.KeyMsg) (handled bool, model Mode
 				return true, m, nil
 			}
 		}
+	case "ctrl+w":
+		// vim window-chord for pane navigation: h/k focus tree, l/j focus diff,
+		// w toggles pane. Unknown second keys are swallowed (vim parity — there
+		// is no passthrough for invalid <C-W> follow-ups).
+		switch keyRune {
+		case 'h', 'k':
+			m.clearVimPrefix()
+			if !m.treePaneHidden() {
+				m.layout.focus = paneTree
+				m.syncTOCCursorToActive()
+			}
+			return true, m, nil
+		case 'l', 'j':
+			m.clearVimPrefix()
+			if m.file.name != "" {
+				m.layout.focus = paneDiff
+			}
+			return true, m, nil
+		case 'w':
+			m.clearVimPrefix()
+			m.togglePane()
+			return true, m, nil
+		}
+		// invalid second key after ctrl+w: swallow without re-dispatch.
+		m.clearVimPrefix()
+		return true, m, nil
 	}
 
 	// chord did not complete: clear chord (count preserved) and fall through.

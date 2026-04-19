@@ -2736,6 +2736,110 @@ func TestModel_VimCount_PageDown3(t *testing.T) {
 	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
 }
 
+func TestModel_VimChord_CtrlW_H_FocusTree(t *testing.T) {
+	files := []string{"a.go", "b.go"}
+	diffs := map[string][]diff.DiffLine{
+		"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}},
+		"b.go": {{NewNum: 1, Content: "b", ChangeType: diff.ChangeContext}},
+	}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	assert.Equal(t, "ctrl+w", model.vim.pendingChord)
+	result, _ = model.Update(keyMsg('h'))
+	model = result.(Model)
+	assert.Equal(t, paneTree, model.layout.focus)
+	assert.Equal(t, "", model.vim.pendingChord)
+}
+
+func TestModel_VimChord_CtrlW_L_FocusDiff(t *testing.T) {
+	files := []string{"a.go"}
+	diffs := map[string][]diff.DiffLine{"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}}}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneTree
+	m.file.name = "a.go"
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('l'))
+	model = result.(Model)
+	assert.Equal(t, paneDiff, model.layout.focus)
+}
+
+func TestModel_VimChord_CtrlW_J_FocusDiff(t *testing.T) {
+	files := []string{"a.go"}
+	diffs := map[string][]diff.DiffLine{"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}}}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneTree
+	m.file.name = "a.go"
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, paneDiff, model.layout.focus)
+}
+
+func TestModel_VimChord_CtrlW_K_FocusTree(t *testing.T) {
+	files := []string{"a.go"}
+	diffs := map[string][]diff.DiffLine{"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}}}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('k'))
+	model = result.(Model)
+	assert.Equal(t, paneTree, model.layout.focus)
+}
+
+func TestModel_VimChord_CtrlW_W_TogglePane(t *testing.T) {
+	files := []string{"a.go"}
+	diffs := map[string][]diff.DiffLine{"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}}}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('w'))
+	model = result.(Model)
+	assert.Equal(t, paneTree, model.layout.focus, "ctrl+w w from diff should toggle to tree")
+
+	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model = result.(Model)
+	result, _ = model.Update(keyMsg('w'))
+	model = result.(Model)
+	assert.Equal(t, paneDiff, model.layout.focus, "ctrl+w w from tree should toggle back to diff")
+}
+
+func TestModel_VimChord_CtrlW_InvalidSwallowed(t *testing.T) {
+	files := []string{"a.go"}
+	diffs := map[string][]diff.DiffLine{"a.go": {{NewNum: 1, Content: "a", ChangeType: diff.ChangeContext}}}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+	m.nav.diffCursor = 0
+
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+	// 'x' is not a valid ctrl+w completer; should be swallowed (no movement, no help, etc.)
+	result, _ = model.Update(keyMsg('x'))
+	model = result.(Model)
+	assert.Equal(t, "", model.vim.pendingChord, "chord must clear")
+	assert.Equal(t, 0, model.nav.diffCursor, "x must not have moved cursor")
+}
+
 func TestModel_VimChord_ZZ_CentersViewport(t *testing.T) {
 	lines := makeContextFile(50)
 	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
