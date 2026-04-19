@@ -642,11 +642,12 @@ While the annotation input is active, press `Ctrl+E` to hand off the current tex
 | `G` | Jump to file bottom (alias for `End`) |
 | `zz` / `zt` / `zb` | Center / top-align / bottom-align cursor in the diff viewport |
 | `{` / `}` | Previous / next hunk (aliases for `[` / `]`) |
+| `yy` | Yank (copy) the diff line under the cursor to the OS clipboard. `Nyy` yanks `N` consecutive lines (dividers and binary/placeholder markers are skipped). Diff pane only; no-op on annotation rows. |
 | `Ctrl+W h/k` | Focus tree pane |
 | `Ctrl+W l/j` | Focus diff pane |
 | `Ctrl+W w` | Toggle pane focus |
 
-Counts apply to: `j`/`k`, `Ctrl+d`/`Ctrl+u`, `PgDn`/`PgUp`, left/right scroll, `n`/`p`/`N` (file or search nav), and `[`/`]`/`{`/`}` (hunks). Counts on `G` and chord targets (`gg`, `zz`, `Ctrl+W h`) are ignored.
+Counts apply to: `j`/`k`, `Ctrl+d`/`Ctrl+u`, `PgDn`/`PgUp`, left/right scroll, `n`/`p`/`N` (file or search nav), `[`/`]`/`{`/`}` (hunks), and `yy` (lines). Counts on `G` and chord targets (`gg`, `zz`, `Ctrl+W h`) are ignored.
 
 ### Status Bar Icons
 

@@ -26,6 +26,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/umputun/revdiff/app/annotation"
+	"github.com/umputun/revdiff/app/clipboard"
 	"github.com/umputun/revdiff/app/diff"
 	"github.com/umputun/revdiff/app/editor"
 	"github.com/umputun/revdiff/app/keymap"
@@ -54,6 +55,13 @@ type SyntaxHighlighter interface {
 // Blamer provides blame information for files.
 type Blamer interface {
 	FileBlame(ref, file string, staged bool) (map[int]diff.BlameLine, error)
+}
+
+// Clipboard abstracts writing text to the OS clipboard. The default wiring
+// is app/clipboard.Writer; tests inject a stub. Defined on the consumer
+// side per Go convention.
+type Clipboard interface {
+	WriteAll(s string) error
 }
 
 // styleResolver is what Model needs for static and runtime style/color lookups.
@@ -378,6 +386,7 @@ type Model struct {
 	keymap       *keymap.Keymap
 	themes       ThemeCatalog   // theme catalog for discovery, resolve, and persistence
 	editor       ExternalEditor // launches $EDITOR for multi-line annotation editing
+	clipboard    Clipboard      // writes yanked diff lines to the OS clipboard
 
 	// grouped state
 	cfg    modelConfigState // immutable session config
@@ -486,6 +495,7 @@ type ModelConfig struct {
 	LoadUntracked func() ([]string, error) // optional untracked-files fetcher (nil when unavailable)
 	Keymap        *keymap.Keymap           // custom key bindings (nil uses defaults)
 	Editor        ExternalEditor           // external-editor driver (nil uses app/editor.Editor{})
+	Clipboard     Clipboard                // OS clipboard writer (nil uses app/clipboard.Writer{})
 	// CommitLog enumerates commits in the current ref range for the commit-info
 	// overlay. When nil, NewModel attempts to derive the source by type-asserting
 	// the Renderer against diff.CommitLogger; if the assertion fails, the feature
@@ -599,6 +609,10 @@ func NewModel(cfg ModelConfig) (Model, error) {
 	if ed == nil || isNilValue(ed) {
 		ed = editor.Editor{}
 	}
+	cb := cfg.Clipboard
+	if cb == nil || isNilValue(cb) {
+		cb = clipboard.Writer{}
+	}
 	cls := resolveCommitLogSource(cfg.CommitLog, cfg.Renderer)
 
 	return Model{
@@ -616,6 +630,7 @@ func NewModel(cfg ModelConfig) (Model, error) {
 		parseTOC:     cfg.ParseTOC,
 		themes:       cfg.Themes,
 		editor:       ed,
+		clipboard:    cb,
 		cfg: modelConfigState{
 			ref:              cfg.Ref,
 			staged:           cfg.Staged,

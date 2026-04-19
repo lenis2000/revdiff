@@ -1,10 +1,13 @@
 package ui
 
 import (
+	"fmt"
 	"strconv"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/umputun/revdiff/app/diff"
 	"github.com/umputun/revdiff/app/ui/sidepane"
 	"github.com/umputun/revdiff/app/ui/style"
 )
@@ -85,6 +88,8 @@ func chordKeyName(msg tea.KeyMsg) string {
 			return "g"
 		case 'z':
 			return "z"
+		case 'y':
+			return "y"
 		}
 	}
 	return ""
@@ -103,6 +108,12 @@ func (m Model) handleVimChordSecondKey(msg tea.KeyMsg) (handled bool, model Mode
 		if keyRune == 'g' {
 			m.clearVimPrefix()
 			return m.dispatchVimGotoStart()
+		}
+	case "y":
+		if keyRune == 'y' {
+			count := vimCount(m.vim.pendingCount)
+			m.clearVimPrefix()
+			return m.dispatchVimYankLine(count)
 		}
 	case "z":
 		// viewport-alignment chords are diff-pane only; no-op outside.
@@ -186,6 +197,61 @@ func (m Model) dispatchVimGotoStart() (handled bool, model Model, cmd tea.Cmd) {
 	return true, m, cmd
 }
 
+// dispatchVimYankLine implements the yy chord: copy up to count consecutive
+// diff content lines starting at the cursor to the OS clipboard. Scope is
+// diff-pane only; the tree pane is a silent no-op (matches zz/zt/zb). Lines
+// that carry no copyable text (dividers, binary markers, placeholders) are
+// skipped; if the cursor sits on one with no content following it, nothing
+// is copied and the status bar shows "nothing to yank". If the cursor is on
+// an injected annotation row the chord is a silent no-op — the user asked
+// for the diff-line text, not the annotation body. Feedback flows through
+// m.commits.hint, the existing one-render transient hint (the field name is
+// a historical accident; it is the generic status-bar hint slot).
+func (m Model) dispatchVimYankLine(count int) (handled bool, model Model, cmd tea.Cmd) {
+	if m.layout.focus != paneDiff {
+		return true, m, nil
+	}
+	if m.annot.cursorOnAnnotation {
+		return true, m, nil
+	}
+	if m.clipboard == nil {
+		return true, m, nil
+	}
+	lines := m.collectYankLines(count)
+	if len(lines) == 0 {
+		m.commits.hint = "nothing to yank"
+		return true, m, nil
+	}
+	payload := strings.Join(lines, "\n")
+	if err := m.clipboard.WriteAll(payload); err != nil {
+		m.commits.hint = fmt.Sprintf("clipboard error: %v", err)
+		return true, m, nil
+	}
+	if len(lines) == 1 {
+		m.commits.hint = "yanked line"
+	} else {
+		m.commits.hint = fmt.Sprintf("yanked %d lines", len(lines))
+	}
+	return true, m, nil
+}
+
+// collectYankLines gathers up to count consecutive copyable diff lines
+// starting at the cursor, skipping dividers, binary markers, and
+// placeholders. Returns the raw Content fields (no +/-/ prefix).
+func (m Model) collectYankLines(count int) []string {
+	if count < 1 || m.nav.diffCursor < 0 || m.nav.diffCursor >= len(m.file.lines) {
+		return nil
+	}
+	out := make([]string, 0, count)
+	for i := m.nav.diffCursor; i < len(m.file.lines) && len(out) < count; i++ {
+		dl := m.file.lines[i]
+		if dl.ChangeType == diff.ChangeDivider || dl.IsBinary || dl.IsPlaceholder {
+			continue
+		}
+		out = append(out, dl.Content)
+	}
+	return out
+}
 
 // digitFromKey returns the numeric value (0-9) of a single-rune digit key, or false otherwise.
 func digitFromKey(msg tea.KeyMsg) (int, bool) {

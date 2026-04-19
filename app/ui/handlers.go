@@ -83,6 +83,7 @@ func vimHelpSection() overlay.HelpSection {
 			{Keys: "G", Description: "jump to file bottom"},
 			{Keys: "zz / zt / zb", Description: "center / top-align / bottom-align cursor in viewport"},
 			{Keys: "{ / }", Description: "previous / next hunk (aliases for [ / ])"},
+			{Keys: "yy", Description: "yank current diff line to clipboard (Nyy yanks N lines)"},
 			{Keys: "Ctrl+W h/k", Description: "focus tree pane"},
 			{Keys: "Ctrl+W l/j", Description: "focus diff pane"},
 			{Keys: "Ctrl+W w", Description: "toggle pane focus"},

@@ -137,11 +137,12 @@ While the annotation input is active, press `Ctrl+E` to hand off the current tex
 | `G` | Jump to file bottom |
 | `zz` / `zt` / `zb` | Center / top-align / bottom-align cursor in diff viewport |
 | `{` / `}` | Previous / next hunk (aliases) |
+| `yy` | Yank current diff line to clipboard (`Nyy` yanks N lines; diff pane only; skips dividers and binary/placeholder markers) |
 | `Ctrl+W h/k` | Focus tree pane |
 | `Ctrl+W l/j` | Focus diff pane |
 | `Ctrl+W w` | Toggle pane focus |
 
-Pending count and chord show in the status bar (right side). Counts apply to all motion keys (j/k, page/half-page/scroll, n/p/N, [/]/{/}); `G` and chord targets ignore counts.
+Pending count and chord show in the status bar (right side). Counts apply to all motion keys (j/k, page/half-page/scroll, n/p/N, [/]/{/}) and `yy` (lines); `G` and chord targets ignore counts.
 
 ## Status Bar Icons
 
