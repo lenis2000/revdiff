@@ -204,12 +204,18 @@ func (m Model) handleMarkReviewed() (tea.Model, tea.Cmd) {
 
 // handleFileOrSearchNav handles next/prev item navigation: navigates search matches when a search
 // is active, otherwise navigates files or TOC entries (no-op in single-file mode without TOC).
+// vim-style count repeats the navigation that many times (capped at the
+// boundaries of the file list / search match list).
 func (m Model) handleFileOrSearchNav(forward bool) (tea.Model, tea.Cmd) {
+	count := vimCount(m.vim.pendingCount)
+	m.vim.pendingCount = 0
 	if len(m.search.matches) > 0 {
-		if forward {
-			m.nextSearchMatch()
-		} else {
-			m.prevSearchMatch()
+		for i := 0; i < count; i++ {
+			if forward {
+				m.nextSearchMatch()
+			} else {
+				m.prevSearchMatch()
+			}
 		}
 		m.syncTOCActiveSection()
 		m.layout.viewport.SetContent(m.renderDiff())
@@ -220,15 +226,26 @@ func (m Model) handleFileOrSearchNav(forward bool) (tea.Model, tea.Cmd) {
 		dir = -1
 	}
 	if m.file.singleFile && m.file.mdTOC != nil {
-		return m.jumpTOCEntry(dir)
+		var lastModel tea.Model = m
+		var lastCmd tea.Cmd
+		for i := 0; i < count; i++ {
+			lastModel, lastCmd = m.jumpTOCEntry(dir)
+			m = lastModel.(Model)
+		}
+		return lastModel, lastCmd
 	}
 	if !m.file.singleFile {
 		m.pendingAnnotJump = nil    // clear pending annotation jump on manual navigation
 		m.nav.pendingHunkJump = nil // clear pending hunk jump on manual navigation
-		if forward {
-			m.tree.StepFile(sidepane.DirectionNext)
-		} else {
-			m.tree.StepFile(sidepane.DirectionPrev)
+		stepDir := sidepane.DirectionNext
+		if !forward {
+			stepDir = sidepane.DirectionPrev
+		}
+		for i := 0; i < count; i++ {
+			if !m.tree.HasFile(stepDir) {
+				break
+			}
+			m.tree.StepFile(stepDir)
 		}
 		return m.loadSelectedIfChanged()
 	}

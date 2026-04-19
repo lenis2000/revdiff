@@ -2736,6 +2736,42 @@ func TestModel_VimCount_PageDown3(t *testing.T) {
 	assert.GreaterOrEqual(t, delta, model.layout.viewport.Height*2, "3 PgDn should move at least ~3 viewport heights down")
 }
 
+func TestModel_VimCount_FileNav2n(t *testing.T) {
+	files := []string{"a.go", "b.go", "c.go", "d.go", "e.go"}
+	diffs := map[string][]diff.DiffLine{}
+	for _, f := range files {
+		diffs[f] = []diff.DiffLine{{NewNum: 1, Content: f, ChangeType: diff.ChangeContext}}
+	}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.file.name = "a.go"
+
+	result, _ := m.Update(keyMsg('2'))
+	model := result.(Model)
+	result, _ = model.Update(keyMsg('n'))
+	model = result.(Model)
+	assert.Equal(t, "c.go", model.tree.SelectedFile(), "2n should advance 2 files")
+}
+
+func TestModel_VimCount_FileNavOvershootStops(t *testing.T) {
+	files := []string{"a.go", "b.go", "c.go"}
+	diffs := map[string][]diff.DiffLine{}
+	for _, f := range files {
+		diffs[f] = []diff.DiffLine{{NewNum: 1, Content: f, ChangeType: diff.ChangeContext}}
+	}
+	m := testModel(files, diffs)
+	m.tree = testNewFileTree(files)
+	m.file.name = "a.go"
+
+	for _, r := range []rune{'9', '9'} {
+		result, _ := m.Update(keyMsg(r))
+		m = result.(Model)
+	}
+	result, _ := m.Update(keyMsg('n'))
+	model := result.(Model)
+	assert.Equal(t, "c.go", model.tree.SelectedFile(), "99n should stop at last file (no wrap)")
+}
+
 func TestModel_VimCount_HunkNav3(t *testing.T) {
 	// 5 hunks separated by context lines.
 	lines := []diff.DiffLine{
