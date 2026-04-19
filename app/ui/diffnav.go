@@ -423,6 +423,8 @@ func (m *Model) handleHorizontalScroll(direction int) {
 // handleDiffNav handles navigation keys when the diff pane is focused.
 func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	action := m.keymap.Resolve(msg.String())
+	count := vimCount(m.vim.pendingCount)
+	m.vim.pendingCount = 0
 	switch action {
 	case keymap.ActionFocusTree:
 		return m.handleSwitchToTree()
@@ -433,10 +435,10 @@ func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.handleHorizontalScroll(1)
 		return m, nil
 	case keymap.ActionDown:
-		m.moveDiffCursorDown()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorDown)
 		m.syncViewportToCursor()
 	case keymap.ActionUp:
-		m.moveDiffCursorUp()
+		m.repeatCursorMove(count, (*Model).moveDiffCursorUp)
 		m.syncViewportToCursor()
 	case keymap.ActionPageDown:
 		m.moveDiffCursorPageDown()

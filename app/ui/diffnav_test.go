@@ -2596,3 +2596,86 @@ func TestModel_DiffLineNum(t *testing.T) {
 	assert.Equal(t, 3, m.diffLineNum(diff.DiffLine{NewNum: 3, ChangeType: diff.ChangeAdd}))
 	assert.Equal(t, 7, m.diffLineNum(diff.DiffLine{OldNum: 7, ChangeType: diff.ChangeRemove}))
 }
+
+// vim count tests below — verify N + motion key applies count.
+
+// makeContextFile builds a 20-line all-context file for cursor-motion tests.
+func makeContextFile(n int) []diff.DiffLine {
+	lines := make([]diff.DiffLine, n)
+	for i := range lines {
+		lines[i] = diff.DiffLine{NewNum: i + 1, Content: "line", ChangeType: diff.ChangeContext}
+	}
+	return lines
+}
+
+func TestModel_VimCount_5j(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	assert.Equal(t, 0, model.nav.diffCursor)
+
+	result, _ = model.Update(keyMsg('5'))
+	model = result.(Model)
+	assert.Equal(t, 5, model.vim.pendingCount)
+
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, 5, model.nav.diffCursor, "5j must move cursor 5 lines")
+	assert.Equal(t, 0, model.vim.pendingCount, "count must clear after motion")
+}
+
+func TestModel_VimCount_3k(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+	model.nav.diffCursor = 10
+
+	result, _ = model.Update(keyMsg('3'))
+	model = result.(Model)
+	result, _ = model.Update(keyMsg('k'))
+	model = result.(Model)
+	assert.Equal(t, 7, model.nav.diffCursor, "3k must move cursor up 3 lines")
+}
+
+func TestModel_VimCount_ClearsAfterMotion(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+
+	result, _ = model.Update(keyMsg('5'))
+	model = result.(Model)
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, 5, model.nav.diffCursor)
+
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, 6, model.nav.diffCursor, "second j must move only 1 line; count must not persist")
+}
+
+func TestModel_VimCount_OvershootStopsAtEnd(t *testing.T) {
+	lines := makeContextFile(20)
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	result, _ := m.Update(fileLoadedMsg{file: "a.go", lines: lines})
+	model := result.(Model)
+
+	for _, r := range []rune{'1', '0', '0', '0', '0'} {
+		result, _ = model.Update(keyMsg(r))
+		model = result.(Model)
+	}
+	result, _ = model.Update(keyMsg('j'))
+	model = result.(Model)
+	assert.Equal(t, len(lines)-1, model.nav.diffCursor, "must stop at last line, not hang")
+	assert.Equal(t, 0, model.vim.pendingCount)
+}

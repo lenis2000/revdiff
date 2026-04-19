@@ -65,3 +65,28 @@ func digitFromKey(msg tea.KeyMsg) (int, bool) {
 	}
 	return int(r - '0'), true
 }
+
+// vimCount returns the effective count for a motion: the pending count when
+// non-zero, otherwise 1 (a single motion). Centralizes the "0 means 1" rule
+// so handlers don't open-code it.
+func vimCount(pending int) int {
+	if pending < 1 {
+		return 1
+	}
+	return pending
+}
+
+// repeatCursorMove invokes step n times, bailing out early if the move makes
+// no progress (cursor would otherwise be stuck at a boundary). Used by
+// count-aware diff cursor motions to avoid spinning when the user types a
+// large count near the file edge.
+func (m *Model) repeatCursorMove(n int, step func(*Model)) {
+	for i := 0; i < n; i++ {
+		prev := m.nav.diffCursor
+		prevOnAnnot := m.annot.cursorOnAnnotation
+		step(m)
+		if m.nav.diffCursor == prev && m.annot.cursorOnAnnotation == prevOnAnnot {
+			return
+		}
+	}
+}
