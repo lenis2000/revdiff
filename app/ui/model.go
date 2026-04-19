@@ -166,7 +166,9 @@ type FileTreeComponent interface {
 	ReviewedCount() int
 	// HasFile returns true if there is a file entry in the given direction.
 	HasFile(dir sidepane.Direction) bool
-	// Move navigates the cursor according to the given motion.
+	// Move navigates the cursor according to the given motion. Optional count
+	// repeats step motions (MotionUp/MotionDown) and sets page size for
+	// MotionPageUp/MotionPageDown; ignored for MotionFirst/MotionLast.
 	Move(m sidepane.Motion, count ...int)
 	// StepFile moves to the next or previous file entry, wrapping around at ends.
 	StepFile(dir sidepane.Direction)
@@ -193,7 +195,9 @@ type TOCComponent interface {
 	CurrentLineIdx() (int, bool)
 	// NumEntries returns the number of TOC entries.
 	NumEntries() int
-	// Move navigates the cursor according to the given motion.
+	// Move navigates the cursor according to the given motion. Optional count
+	// repeats step motions (MotionUp/MotionDown) and sets page size for
+	// MotionPageUp/MotionPageDown; ignored for MotionFirst/MotionLast.
 	Move(m sidepane.Motion, count ...int)
 	// EnsureVisible adjusts offset so the cursor is within the visible range.
 	EnsureVisible(height int)

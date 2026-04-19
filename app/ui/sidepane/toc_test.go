@@ -248,6 +248,24 @@ func TestTOC_MoveUpDown(t *testing.T) {
 		single.Move(MotionDown)
 		assert.Equal(t, 0, single.cursor)
 	})
+
+	t.Run("count repeats step motions", func(t *testing.T) {
+		toc.cursor = 0
+		toc.Move(MotionDown, 2)
+		assert.Equal(t, 2, toc.cursor, "MotionDown with count=2 should advance 2 entries")
+	})
+
+	t.Run("count overshoot stops at last entry", func(t *testing.T) {
+		toc.cursor = 0
+		toc.Move(MotionDown, 99)
+		assert.Equal(t, 2, toc.cursor)
+	})
+
+	t.Run("count repeats MotionUp", func(t *testing.T) {
+		toc.cursor = 2
+		toc.Move(MotionUp, 2)
+		assert.Equal(t, 0, toc.cursor)
+	})
 }
 
 func TestTOC_EnsureVisible(t *testing.T) {

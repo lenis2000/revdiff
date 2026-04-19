@@ -118,35 +118,27 @@ func (t *TOC) CurrentLineIdx() (int, bool) {
 }
 
 // Move navigates the cursor according to the given motion.
-// count is variadic: page motions use count[0] for the page size,
-// non-page motions ignore count entirely. Missing count for page motions
-// defaults to 1 (single step), which is harmless.
+// count is variadic: when omitted, defaults to 1. MotionUp / MotionDown move
+// by count entries (clamped at the ends, no wrap). MotionPageUp / MotionPageDown
+// use count as the page size. MotionFirst / MotionLast ignore count.
 func (t *TOC) Move(m Motion, count ...int) {
+	if len(t.entries) == 0 {
+		return
+	}
+	n := 1
+	if len(count) > 0 && count[0] > 1 {
+		n = count[0]
+	}
+	last := len(t.entries) - 1
 	switch m {
-	case MotionUp:
-		if t.cursor > 0 {
-			t.cursor--
-		}
-	case MotionDown:
-		if t.cursor < len(t.entries)-1 {
-			t.cursor++
-		}
-	case MotionPageUp:
-		n := 1
-		if len(count) > 0 {
-			n = count[0]
-		}
+	case MotionUp, MotionPageUp:
 		t.cursor = max(0, t.cursor-n)
-	case MotionPageDown:
-		n := 1
-		if len(count) > 0 {
-			n = count[0]
-		}
-		t.cursor = min(len(t.entries)-1, t.cursor+n)
+	case MotionDown, MotionPageDown:
+		t.cursor = min(last, t.cursor+n)
 	case MotionFirst:
 		t.cursor = 0
 	case MotionLast:
-		t.cursor = max(0, len(t.entries)-1)
+		t.cursor = last
 	}
 }
 

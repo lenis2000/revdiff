@@ -680,10 +680,26 @@ func TestFileTreeMove_VariadicCount(t *testing.T) {
 		assert.Equal(t, "c.go", ft.SelectedFile())
 	})
 
-	t.Run("count ignored for non-page motions", func(t *testing.T) {
+	t.Run("count repeats step motions", func(t *testing.T) {
+		ft := NewFileTree(fileEntries("a.go", "b.go", "c.go", "d.go", "e.go"))
+		ft.Move(MotionDown, 3)
+		assert.Equal(t, "d.go", ft.SelectedFile(), "MotionDown with count=3 should advance 3 file entries")
+	})
+
+	t.Run("count overshoot stops at last file", func(t *testing.T) {
 		ft := NewFileTree(fileEntries("a.go", "b.go", "c.go"))
 		ft.Move(MotionDown, 99)
-		assert.Equal(t, "b.go", ft.SelectedFile(), "count should be ignored for MotionDown")
+		assert.Equal(t, "c.go", ft.SelectedFile(), "MotionDown with overshoot stops at last file (no wrap)")
+	})
+
+	t.Run("count repeats MotionUp", func(t *testing.T) {
+		ft := NewFileTree(fileEntries("a.go", "b.go", "c.go", "d.go"))
+		ft.Move(MotionDown)
+		ft.Move(MotionDown)
+		ft.Move(MotionDown)
+		assert.Equal(t, "d.go", ft.SelectedFile())
+		ft.Move(MotionUp, 2)
+		assert.Equal(t, "b.go", ft.SelectedFile(), "MotionUp with count=2 should retreat 2 file entries")
 	})
 }
 

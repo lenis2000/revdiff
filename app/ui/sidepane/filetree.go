@@ -113,26 +113,35 @@ func (ft *FileTree) HasFile(dir Direction) bool {
 }
 
 // Move navigates the cursor according to the given motion.
-// count is variadic: page motions use count[0] for the page size,
-// non-page motions ignore count entirely. Missing count for page motions
-// defaults to 1 (single step), which is harmless.
+// count is variadic: when omitted, defaults to 1.
+// MotionUp / MotionDown repeat the step that many times, stopping at the first
+// or last file entry without wrapping. MotionPageUp / MotionPageDown use count
+// as the page size in visual rows. MotionFirst / MotionLast ignore count.
 func (ft *FileTree) Move(m Motion, count ...int) {
+	n := 1
+	if len(count) > 0 && count[0] > 1 {
+		n = count[0]
+	}
 	switch m {
 	case MotionUp:
-		ft.moveUp()
-	case MotionDown:
-		ft.moveDown()
-	case MotionPageUp:
-		n := 1
-		if len(count) > 0 {
-			n = count[0]
+		for i := 0; i < n; i++ {
+			prev := ft.cursor
+			ft.moveUp()
+			if ft.cursor == prev {
+				return
+			}
 		}
+	case MotionDown:
+		for i := 0; i < n; i++ {
+			prev := ft.cursor
+			ft.moveDown()
+			if ft.cursor == prev {
+				return
+			}
+		}
+	case MotionPageUp:
 		ft.pageUp(n)
 	case MotionPageDown:
-		n := 1
-		if len(count) > 0 {
-			n = count[0]
-		}
 		ft.pageDown(n)
 	case MotionFirst:
 		ft.moveToFirst()
