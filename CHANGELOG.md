@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.23.0 - 2026-04-22
+
+### New Features
+
+- add mouse support (scroll-wheel and left-click for pane and file selection) #142 @umputun
+
 ## v0.22.0 - 2026-04-21
 
 ### New Features
