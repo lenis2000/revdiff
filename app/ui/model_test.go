@@ -3,6 +3,7 @@ package ui
 import (
 	"testing"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -834,4 +835,569 @@ func TestModel_NewModel_ReloadApplicable(t *testing.T) {
 			ModelConfig{ReloadApplicable: false})
 		assert.False(t, m.reload.applicable)
 	})
+}
+
+func TestDispatchAction_OverlayOpen(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	require.False(t, m.overlay.Active(), "precondition: no overlay active")
+
+	result, cmd := m.dispatchAction(keymap.ActionHelp)
+	model := result.(Model)
+	assert.True(t, model.overlay.Active(), "help action should open help overlay")
+	assert.Nil(t, cmd)
+}
+
+func TestDispatchAction_Resolves(t *testing.T) {
+	tests := []struct {
+		name   string
+		action keymap.Action
+		verify func(t *testing.T, m Model, cmd tea.Cmd)
+	}{
+		{
+			name:   "ActionQuit returns tea.Quit",
+			action: keymap.ActionQuit,
+			verify: func(t *testing.T, _ Model, cmd tea.Cmd) {
+				require.NotNil(t, cmd)
+				msg := cmd()
+				_, ok := msg.(tea.QuitMsg)
+				assert.True(t, ok, "ActionQuit must produce tea.QuitMsg")
+			},
+		},
+		{
+			name:   "ActionTogglePane switches focus",
+			action: keymap.ActionTogglePane,
+			verify: func(t *testing.T, m Model, _ tea.Cmd) {
+				assert.Equal(t, paneDiff, m.layout.focus, "toggle_pane with file loaded should go to diff")
+			},
+		},
+		{
+			name:   "ActionHelp opens help overlay",
+			action: keymap.ActionHelp,
+			verify: func(t *testing.T, m Model, _ tea.Cmd) {
+				assert.True(t, m.overlay.Active(), "help must open overlay")
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testModel([]string{"a.go"}, nil)
+			m.tree = testNewFileTree([]string{"a.go"})
+			m.file.name = "a.go" // enables togglePane to switch to diff
+			result, cmd := m.dispatchAction(tc.action)
+			tc.verify(t, result.(Model), cmd)
+		})
+	}
+}
+
+func TestDispatchAction_PaneNavFallback_Diff(t *testing.T) {
+	lines := []diff.DiffLine{
+		{NewNum: 1, Content: "line1", ChangeType: diff.ChangeContext},
+		{NewNum: 2, Content: "line2", ChangeType: diff.ChangeContext},
+	}
+	m := testModel([]string{"a.go"}, map[string][]diff.DiffLine{"a.go": lines})
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+	m.file.lines = lines
+	m.nav.diffCursor = 0
+
+	result, _ := m.dispatchAction(keymap.ActionDown)
+	model := result.(Model)
+	assert.Equal(t, 1, model.nav.diffCursor, "ActionDown should route to handleDiffAction and move cursor")
+}
+
+func TestDispatchAction_PaneNavFallback_Tree(t *testing.T) {
+	m := testModel([]string{"a.go", "b.go"}, nil)
+	m.tree = testNewFileTree([]string{"a.go", "b.go"})
+	m.layout.focus = paneTree
+	require.Equal(t, "a.go", m.tree.SelectedFile(), "precondition: first file selected")
+
+	result, _ := m.dispatchAction(keymap.ActionDown)
+	model := result.(Model)
+	assert.Equal(t, "b.go", model.tree.SelectedFile(), "ActionDown should route to handleTreeAction and move selection")
+}
+
+func TestHandleChordSecond_ResolvedDispatches(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, cmd := m.handleChordSecond("x")
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "chordPending must clear after dispatch")
+	assert.Empty(t, model.keys.hint, "hint must clear after successful dispatch")
+	require.NotNil(t, cmd, "resolved ActionQuit must produce a tea.Cmd")
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok, "resolved chord must dispatch ActionQuit through dispatchAction")
+}
+
+func TestHandleChordSecond_UnboundShowsHint(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, cmd := m.handleChordSecond("q")
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "chordPending must clear after unbound second")
+	assert.Equal(t, "Unknown chord: ctrl+w>q", model.keys.hint, "unbound second key must set Unknown chord hint")
+	assert.Nil(t, cmd, "unbound chord must not produce a tea.Cmd")
+}
+
+func TestHandleChordSecond_EscCancels(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, cmd := m.handleChordSecond("esc")
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "esc must clear chordPending")
+	assert.Empty(t, model.keys.hint, "esc must clear hint silently (no Unknown chord message)")
+	assert.Nil(t, cmd, "esc must not dispatch any action")
+}
+
+func TestHandleChordSecond_LayoutFallback(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+	m.keys.chordPending = "ctrl+w"
+
+	// Cyrillic 'ч' sits on the same physical key as Latin 'x' on a QWERTY layout;
+	// ResolveChord's layout-resolve fallback must translate it and find the binding.
+	result, cmd := m.handleChordSecond("ч")
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "chordPending must clear even when resolved via layout fallback")
+	assert.Empty(t, model.keys.hint, "hint must clear on successful layout-fallback dispatch")
+	require.NotNil(t, cmd, "layout-fallback match must dispatch the bound action")
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok, "Cyrillic ч on ctrl+w pending must resolve ctrl+w>x chord")
+}
+
+func TestHandleChordSecond_DispatchesToTOCWhenFocused(t *testing.T) {
+	// regression: when TOC is focused, chord-resolved actions must flow through
+	// the pre-resolved action path and NOT be re-resolved from the synthesized
+	// second-stage key (which would turn `x` into whatever `x` is bound to
+	// standalone, losing the chord action). `x` is unbound by default, so the
+	// buggy path would be a no-op; the correct path honors the pre-resolved
+	// ActionDown and advances the TOC cursor.
+	mdLines := []diff.DiffLine{
+		{NewNum: 1, Content: "# First", ChangeType: diff.ChangeContext},
+		{NewNum: 2, Content: "text", ChangeType: diff.ChangeContext},
+		{NewNum: 3, Content: "## Second", ChangeType: diff.ChangeContext},
+	}
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionDown)
+
+	m := testModel([]string{"README.md"}, map[string][]diff.DiffLine{"README.md": mdLines})
+	m.keymap = km
+	m.file.singleFile = true
+	m.file.mdTOC = sidepane.ParseTOC(mdLines, "README.md")
+	require.NotNil(t, m.file.mdTOC)
+	m.file.name = "README.md"
+	m.file.lines = mdLines
+	m.layout.focus = paneTree
+	// entries: [0]=README.md(lineIdx=0), [1]=First(lineIdx=0), [2]=Second(lineIdx=2).
+	// seed cursor at [1] so ActionDown advances to [2] with an observably different lineIdx.
+	m.file.mdTOC.Move(sidepane.MotionDown)
+	m.keys.chordPending = "ctrl+w"
+
+	before, _ := m.file.mdTOC.CurrentLineIdx()
+	require.Equal(t, 0, before, "precondition: cursor at First entry (lineIdx=0)")
+
+	result, _ := m.handleChordSecond("x")
+	model := result.(Model)
+
+	after, _ := model.file.mdTOC.CurrentLineIdx()
+	assert.Equal(t, 2, after, "chord-resolved ActionDown must advance TOC cursor to Second entry (lineIdx=2)")
+	assert.Empty(t, model.keys.chordPending, "chordPending must clear after TOC dispatch")
+}
+
+func TestTransientHint_ChordHintLowestPriority(t *testing.T) {
+	tests := []struct {
+		name    string
+		setHint func(m *Model)
+		want    string
+	}{
+		{name: "keys hint alone", setHint: func(m *Model) { m.keys.hint = "Unknown chord: ctrl+w>q" }, want: "Unknown chord: ctrl+w>q"},
+		{name: "commits beats keys", setHint: func(m *Model) { m.commits.hint = "no commits"; m.keys.hint = "chord hint" }, want: "no commits"},
+		{name: "reload beats keys", setHint: func(m *Model) { m.reload.hint = "Reloaded"; m.keys.hint = "chord hint" }, want: "Reloaded"},
+		{name: "compact beats keys", setHint: func(m *Model) { m.compact.hint = "compact off"; m.keys.hint = "chord hint" }, want: "compact off"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			m := testModel([]string{"a.go"}, nil)
+			tc.setHint(&m)
+			assert.Equal(t, tc.want, m.transientHint())
+		})
+	}
+}
+
+func TestHandleKey_EntersChordPending(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+
+	assert.Equal(t, "ctrl+w", model.keys.chordPending, "leader key must set chordPending")
+	assert.Equal(t, "Pending: ctrl+w, esc to cancel", model.keys.hint, "status hint must announce pending chord")
+	assert.Nil(t, cmd, "entering pending state must not produce a tea.Cmd")
+}
+
+func TestHandleKey_ChordSecondCoexistenceGuard(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+
+	// simulate buggy coexistence: chord pending AND search active at the same time.
+	// the chord-second guard runs BEFORE handleModalKey, so the second key must
+	// resolve as chord-second and must NOT leak into the search textinput.
+	m.keys.chordPending = "ctrl+w"
+	m.search.active = true
+	m.search.input = textinput.New()
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "chord-second guard must clear chordPending")
+	assert.Empty(t, model.search.input.Value(), "search textinput must NOT receive the chord-second key")
+	require.NotNil(t, cmd, "resolved chord must dispatch ActionQuit")
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok, "chord-second must dispatch the bound ActionQuit even with search active")
+}
+
+func TestHandleKey_ChordIgnoredWhenPendingReload(t *testing.T) {
+	km := keymap.Default()
+	km.Bind("ctrl+w>x", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+	// simulate the state produced by pressing R with annotations present
+	m.reload.applicable = true
+	m.reload.pending = true
+	m.reload.hint = "Annotations will be dropped — press y to confirm, any other key to cancel"
+
+	// send the chord leader; handlePendingReload must intercept first, so the
+	// chord-first guard never runs and chordPending stays empty.
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "chord-first guard must not fire while reload is pending")
+	assert.False(t, model.reload.pending, "non-y key cancels pending reload")
+	assert.Equal(t, "Reload canceled", model.reload.hint, "reload-cancel hint must be set")
+}
+
+func TestHandleKey_LeaderWithStandaloneActionDoesNotEnterChord(t *testing.T) {
+	km := keymap.Default()
+	// bind ctrl+w as a standalone action (no chord binding for ctrl+w>*)
+	km.Bind("ctrl+w", keymap.ActionQuit)
+	m := testModel([]string{"a.go"}, nil)
+	m.keymap = km
+
+	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlW})
+	model := result.(Model)
+
+	assert.Empty(t, model.keys.chordPending, "standalone-bound leader must not enter chord-pending state")
+	assert.Empty(t, model.keys.hint, "no chord hint when the key resolves to a standalone action")
+	require.NotNil(t, cmd, "standalone ActionQuit must dispatch")
+	_, ok := cmd().(tea.QuitMsg)
+	assert.True(t, ok, "ctrl+w must fire the standalone ActionQuit")
+}
+
+func TestClearChordState(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	m.clearChordState()
+
+	assert.Empty(t, m.keys.chordPending, "chordPending must be cleared")
+	assert.Empty(t, m.keys.hint, "hint must be cleared alongside chordPending")
+}
+
+func TestHandleOverlayOpen_HelpClearsChord(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, handled := m.handleOverlayOpen(keymap.ActionHelp)
+	model := result.(Model)
+
+	assert.True(t, handled, "ActionHelp must be handled by handleOverlayOpen")
+	assert.Empty(t, model.keys.chordPending, "help overlay entry must clear chordPending")
+	assert.Empty(t, model.keys.hint, "help overlay entry must clear chord hint")
+	assert.True(t, model.overlay.Active(), "help overlay must be open")
+	assert.Equal(t, overlay.KindHelp, model.overlay.Kind())
+}
+
+func TestHandleOverlayOpen_AnnotListClearsChord(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, handled := m.handleOverlayOpen(keymap.ActionAnnotList)
+	model := result.(Model)
+
+	assert.True(t, handled, "ActionAnnotList must be handled by handleOverlayOpen")
+	assert.Empty(t, model.keys.chordPending, "annot-list overlay entry must clear chordPending")
+	assert.Empty(t, model.keys.hint, "annot-list overlay entry must clear chord hint")
+	assert.True(t, model.overlay.Active(), "annot-list overlay must be open")
+	assert.Equal(t, overlay.KindAnnotList, model.overlay.Kind())
+}
+
+func TestHandleOverlayOpen_ThemeSelectClearsChord(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.themes = newTestThemeCatalog()
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, handled := m.handleOverlayOpen(keymap.ActionThemeSelect)
+	model := result.(Model)
+
+	assert.True(t, handled, "ActionThemeSelect must be handled by handleOverlayOpen")
+	assert.Empty(t, model.keys.chordPending, "theme-select overlay entry must clear chordPending")
+	assert.Empty(t, model.keys.hint, "theme-select overlay entry must clear chord hint")
+	assert.True(t, model.overlay.Active(), "theme-select overlay must be open")
+	assert.Equal(t, overlay.KindThemeSelect, model.overlay.Kind())
+}
+
+func TestHandleOverlayOpen_CommitInfoClearsChord(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.commits.source = &fakeCommitLog{}
+	m.commits.applicable = true
+	m.commits.loaded = true
+	m.commits.list = []diff.CommitInfo{{Hash: "abc"}}
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	result, handled := m.handleOverlayOpen(keymap.ActionCommitInfo)
+	model := result.(Model)
+
+	assert.True(t, handled, "ActionCommitInfo must be handled by handleOverlayOpen")
+	assert.Empty(t, model.keys.chordPending, "commit-info overlay entry must clear chordPending")
+	assert.Empty(t, model.keys.hint, "commit-info overlay entry must clear chord hint")
+	assert.True(t, model.overlay.Active(), "commit-info overlay must be open")
+	assert.Equal(t, overlay.KindCommitInfo, model.overlay.Kind())
+}
+
+func TestStartSearch_ClearsChord(t *testing.T) {
+	m := testModel([]string{"a.go"}, nil)
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	m.startSearch()
+
+	assert.Empty(t, m.keys.chordPending, "startSearch must clear chordPending")
+	assert.Empty(t, m.keys.hint, "startSearch must clear chord hint")
+	assert.True(t, m.search.active, "startSearch must enter searching mode")
+}
+
+func TestStartAnnotation_ClearsChord(t *testing.T) {
+	lines := []diff.DiffLine{
+		{NewNum: 5, Content: "line5", ChangeType: diff.ChangeContext},
+	}
+	m := testModel([]string{"a.go"}, nil)
+	m.tree = testNewFileTree([]string{"a.go"})
+	m.layout.focus = paneDiff
+	m.file.name = "a.go"
+	m.file.lines = lines
+	m.nav.diffCursor = 0
+	m.keys.chordPending = "ctrl+w"
+	m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+	m.startAnnotation()
+
+	assert.Empty(t, m.keys.chordPending, "startAnnotation must clear chordPending")
+	assert.Empty(t, m.keys.hint, "startAnnotation must clear chord hint")
+	assert.True(t, m.annot.annotating, "startAnnotation must enter annotating mode")
+}
+
+func TestHandleKey_ChordPrecedence(t *testing.T) {
+	leader := tea.KeyMsg{Type: tea.KeyCtrlW}
+	boundSecond := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}}
+	unboundSecond := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'q'}}
+	escKey := tea.KeyMsg{Type: tea.KeyEsc}
+
+	tests := []struct {
+		name  string
+		setup func(t *testing.T, m *Model)
+		send  tea.KeyMsg
+		check func(t *testing.T, after Model, cmd tea.Cmd)
+	}{
+		{
+			name:  "clean state, leader sets pending",
+			setup: func(t *testing.T, m *Model) {},
+			send:  leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Equal(t, "ctrl+w", after.keys.chordPending, "leader must set chordPending")
+				assert.Equal(t, "Pending: ctrl+w, esc to cancel", after.keys.hint, "pending hint must be set")
+				assert.Nil(t, cmd, "entering pending state must not produce a tea.Cmd")
+			},
+		},
+		{
+			name: "chord pending, bound second dispatches",
+			setup: func(t *testing.T, m *Model) {
+				m.keys.chordPending = "ctrl+w"
+				m.keys.hint = "Pending: ctrl+w, esc to cancel"
+			},
+			send: boundSecond,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chordPending must clear after dispatch")
+				assert.Empty(t, after.keys.hint, "hint must clear after successful dispatch")
+				require.NotNil(t, cmd, "resolved chord must dispatch ActionQuit")
+				_, ok := cmd().(tea.QuitMsg)
+				assert.True(t, ok, "second-stage 'x' must dispatch ctrl+w>x → ActionQuit")
+			},
+		},
+		{
+			name: "chord pending, unbound second sets Unknown chord hint",
+			setup: func(t *testing.T, m *Model) {
+				m.keys.chordPending = "ctrl+w"
+				m.keys.hint = "Pending: ctrl+w, esc to cancel"
+			},
+			send: unboundSecond,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chordPending must clear after unbound second")
+				assert.Equal(t, "Unknown chord: ctrl+w>q", after.keys.hint, "unbound second must set Unknown chord hint")
+				assert.Nil(t, cmd, "unbound chord must not dispatch any action")
+			},
+		},
+		{
+			name: "chord pending, esc cancels silently",
+			setup: func(t *testing.T, m *Model) {
+				m.keys.chordPending = "ctrl+w"
+				m.keys.hint = "Pending: ctrl+w, esc to cancel"
+			},
+			send: escKey,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "esc must clear chordPending")
+				assert.Empty(t, after.keys.hint, "esc must clear hint silently (no Unknown chord message)")
+				assert.Nil(t, cmd, "esc must not dispatch any action")
+			},
+		},
+		{
+			name: "chord pending, leader again consumed as second-stage (Unknown chord)",
+			setup: func(t *testing.T, m *Model) {
+				m.keys.chordPending = "ctrl+w"
+				m.keys.hint = "Pending: ctrl+w, esc to cancel"
+			},
+			send: leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chord-second must consume the leader and clear pending")
+				assert.Equal(t, "Unknown chord: ctrl+w>ctrl+w", after.keys.hint, "leader>leader is unbound, must surface Unknown chord")
+				assert.Nil(t, cmd, "unbound chord must not dispatch any action")
+			},
+		},
+		{
+			name: "annotate active, leader does not enter chord",
+			setup: func(t *testing.T, m *Model) {
+				m.annot.annotating = true
+				m.annot.input = textinput.New()
+			},
+			send: leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chord-first guard must not fire while annotating (modal eats the key)")
+				assert.Empty(t, after.keys.hint, "no chord hint when modal owns the key")
+				assert.True(t, after.annot.annotating, "annotation mode stays active")
+			},
+		},
+		{
+			name: "search active, leader does not enter chord",
+			setup: func(t *testing.T, m *Model) {
+				m.search.active = true
+				m.search.input = textinput.New()
+			},
+			send: leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chord-first guard must not fire while searching (modal eats the key)")
+				assert.Empty(t, after.keys.hint, "no chord hint when modal owns the key")
+				assert.True(t, after.search.active, "search mode stays active")
+			},
+		},
+		{
+			name: "overlay active, leader does not enter chord",
+			setup: func(t *testing.T, m *Model) {
+				m.overlay.OpenHelp(m.buildHelpSpec())
+			},
+			send: leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chord-first guard must not fire while overlay is active (handleModalKey routes to overlay)")
+				assert.Empty(t, after.keys.hint, "no chord hint when overlay owns the key")
+				assert.True(t, after.overlay.Active(), "overlay stays active")
+			},
+		},
+		{
+			name: "pending reload, leader cancels reload (chord not entered)",
+			setup: func(t *testing.T, m *Model) {
+				m.reload.applicable = true
+				m.reload.pending = true
+				m.reload.hint = "Annotations will be dropped — press y to confirm, any other key to cancel"
+			},
+			send: leader,
+			check: func(t *testing.T, after Model, cmd tea.Cmd) {
+				assert.Empty(t, after.keys.chordPending, "chord-first guard must not fire while reload is pending")
+				assert.False(t, after.reload.pending, "non-y key cancels pending reload")
+				assert.Equal(t, "Reload canceled", after.reload.hint, "reload-cancel hint must replace pending prompt")
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			km := keymap.Default()
+			km.Bind("ctrl+w>x", keymap.ActionQuit)
+			m := testModel([]string{"a.go"}, nil)
+			m.keymap = km
+			tc.setup(t, &m)
+
+			result, cmd := m.Update(tc.send)
+			after := result.(Model)
+			tc.check(t, after, cmd)
+		})
+	}
+}
+
+func TestHandleKey_NonKeyMessagesPreserveChordState(t *testing.T) {
+	tests := []struct {
+		name string
+		msg  tea.Msg
+	}{
+		{name: "WindowSizeMsg", msg: tea.WindowSizeMsg{Width: 100, Height: 40}},
+		// stale seq makes the handlers short-circuit without touching unrelated state
+		{name: "filesLoadedMsg", msg: filesLoadedMsg{seq: 99999}},
+		{name: "blameLoadedMsg", msg: blameLoadedMsg{file: "a.go", seq: 99999}},
+		{name: "commitsLoadedMsg", msg: commitsLoadedMsg{seq: 99999}},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			km := keymap.Default()
+			km.Bind("ctrl+w>x", keymap.ActionQuit)
+			m := testModel([]string{"a.go"}, nil)
+			m.keymap = km
+			m.keys.chordPending = "ctrl+w"
+			m.keys.hint = "Pending: ctrl+w, esc to cancel"
+
+			result, _ := m.Update(tc.msg)
+			after := result.(Model)
+
+			assert.Equal(t, "ctrl+w", after.keys.chordPending, "chordPending must survive non-key messages (route through Update, not handleKey)")
+			assert.Equal(t, "Pending: ctrl+w, esc to cancel", after.keys.hint, "chord hint must survive non-key messages")
+		})
+	}
 }

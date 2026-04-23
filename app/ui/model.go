@@ -345,6 +345,18 @@ type compactState struct {
 	hint       string // transient status-bar message; cleared on next key press
 }
 
+// keyState holds transient key-dispatch state for the leader-chord feature.
+// It lives separate from navigationState because chord state is a key-dispatch
+// concern, not a cursor/scroll concern — keeping the two split prevents
+// navigationState from growing into a grab-bag. chordPending holds the leader
+// key while waiting for the second-stage key ("" otherwise); hint is a
+// transient status-bar message ("Pending: …" while waiting, "Unknown chord: …"
+// on a miss) cleared on the next key press.
+type keyState struct {
+	chordPending string // leader key while waiting for the second-stage key; "" otherwise
+	hint         string // transient status-bar message; cleared on next key press
+}
+
 // annotationState holds annotation input lifecycle state.
 type annotationState struct {
 	annotating         bool            // true when annotation text input is active
@@ -389,6 +401,7 @@ type Model struct {
 	commits     commitsState      // eagerly loaded commit log for the commit-info overlay
 	reload      reloadState       // pending-confirmation state and applicability for R reload
 	compact     compactState      // applicability + transient hint for compact diff mode
+	keys        keyState          // chord-pending state and transient hint for leader-chord keybindings
 
 	ready        bool   // true after first WindowSizeMsg
 	filesLoaded  bool   // true after the first filesLoadedMsg is handled (keeps the loading view pinned until real data arrives)
@@ -714,10 +727,20 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	m.commits.hint = ""
 	m.reload.hint = ""
 	m.compact.hint = ""
+	m.keys.hint = ""
 
 	// pending-reload intercept: y confirms, any other key cancels
 	if m.reload.pending {
 		return m.handlePendingReload(msg)
+	}
+
+	// chord-second guard: a second key arriving while a chord is pending must
+	// be consumed as the chord's second stage, regardless of any modal that
+	// would otherwise eat it. Modal-entry paths clear chord state explicitly,
+	// so coexistence should not occur in normal flow — this guard is
+	// defense-in-depth.
+	if m.keys.chordPending != "" {
+		return m.handleChordSecond(msg.String())
 	}
 
 	if handled, model, cmd := m.handleModalKey(msg); handled {
@@ -726,6 +749,24 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	action := m.keymap.Resolve(msg.String())
 
+	// chord-first guard: an unresolved key that is a registered chord leader
+	// enters pending state. Load-time conflict resolution guarantees no key is
+	// bound both as a standalone action and a chord prefix, so action is empty
+	// whenever IsChordLeader returns true; the guard stays purely additive.
+	if action == "" && m.keymap.IsChordLeader(msg.String()) {
+		m.keys.chordPending = msg.String()
+		m.keys.hint = "Pending: " + msg.String() + ", esc to cancel"
+		return m, nil
+	}
+
+	return m.dispatchAction(action)
+}
+
+// dispatchAction routes a resolved keymap action through overlay-open, the
+// global action switch, and the pane-specific nav fallback. It is the unified
+// dispatch path shared by keymap-resolved single keys (handleKey) and by
+// chord-resolved actions (handleChordSecond).
+func (m Model) dispatchAction(action keymap.Action) (tea.Model, tea.Cmd) {
 	if model, ok := m.handleOverlayOpen(action); ok {
 		return model, nil
 	}
@@ -765,30 +806,47 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	// pane-specific navigation
 	switch m.layout.focus {
 	case paneTree:
-		return m.handleTreeNav(msg)
+		return m.handleTreeAction(action)
 	case paneDiff:
-		return m.handleDiffNav(msg)
+		return m.handleDiffAction(action)
 	}
 	return m, nil
 }
 
 func (m Model) handleOverlayOpen(action keymap.Action) (tea.Model, bool) {
+	// clear chord state on any overlay-opening action so a pending chord never
+	// coexists with an active overlay. the non-overlay default case short-circuits
+	// below without touching chord state.
 	switch action {
 	case keymap.ActionHelp:
+		m.clearChordState()
 		m.overlay.OpenHelp(m.buildHelpSpec())
 		return m, true
 	case keymap.ActionAnnotList:
+		m.clearChordState()
 		m.overlay.OpenAnnotList(m.buildAnnotListSpec())
 		return m, true
 	case keymap.ActionThemeSelect:
+		m.clearChordState()
 		m.openThemeSelector()
 		return m, true
 	case keymap.ActionCommitInfo:
+		m.clearChordState()
 		m.handleCommitInfo()
 		return m, true
 	default:
 		return m, false
 	}
+}
+
+// clearChordState clears both chord-pending and the chord hint, enforcing the
+// invariant that the two fields are always cleared together. Called by modal-
+// entry paths (startSearch, startAnnotation, handleOverlayOpen) so chord state
+// never coexists with an active modal — the early chord-second guard in
+// handleKey is defense-in-depth against accidental coexistence.
+func (m *Model) clearChordState() {
+	m.keys.chordPending = ""
+	m.keys.hint = ""
 }
 
 // handleCommitInfo opens the commit-info overlay when the feature is available
@@ -835,6 +893,26 @@ func (m Model) handlePendingReload(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 	m.reload.hint = "Reload canceled"
 	return m, nil
+}
+
+// handleChordSecond dispatches the second-stage key of a pending chord. esc
+// cancels silently, an unbound second key surfaces an "Unknown chord" hint,
+// and a resolved action flows through dispatchAction so chord-bound actions
+// reach the same handlers as keymap-resolved single keys. The local copy of
+// Model carries the cleared chord state back to bubbletea.
+func (m Model) handleChordSecond(keyStr string) (tea.Model, tea.Cmd) {
+	prefix := m.keys.chordPending
+	m.keys.chordPending = ""
+	m.keys.hint = ""
+	if keyStr == "esc" {
+		return m, nil
+	}
+	action := m.keymap.ResolveChord(prefix, keyStr)
+	if action == "" {
+		m.keys.hint = "Unknown chord: " + prefix + ">" + keyStr
+		return m, nil
+	}
+	return m.dispatchAction(action)
 }
 
 // handleReload handles the ActionReload key. In stdin mode the feature is

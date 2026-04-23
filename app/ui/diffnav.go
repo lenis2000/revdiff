@@ -420,9 +420,8 @@ func (m *Model) handleHorizontalScroll(direction int) {
 	m.layout.viewport.SetContent(m.renderDiff())
 }
 
-// handleDiffNav handles navigation keys when the diff pane is focused.
-func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	action := m.keymap.Resolve(msg.String())
+// handleDiffAction dispatches a resolved action when the diff pane is focused.
+func (m Model) handleDiffAction(action keymap.Action) (tea.Model, tea.Cmd) {
 	switch action {
 	case keymap.ActionFocusTree:
 		return m.handleSwitchToTree()
@@ -465,14 +464,15 @@ func (m Model) handleDiffNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleTreeNav handles navigation keys when the tree pane is focused.
-func (m Model) handleTreeNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+// handleTreeAction dispatches a resolved action when the tree pane is focused.
+// When markdown TOC is active, routes to TOC navigation so chord-resolved and
+// keymap-resolved actions reach the TOC without re-resolving from the raw key.
+func (m Model) handleTreeAction(action keymap.Action) (tea.Model, tea.Cmd) {
 	// when mdTOC is active, route navigation to TOC instead of file tree
 	if m.file.mdTOC != nil {
-		return m.handleTOCNav(msg)
+		return m.handleTOCNav(action)
 	}
 
-	action := m.keymap.Resolve(msg.String())
 	switch action {
 	case keymap.ActionDown:
 		m.tree.Move(sidepane.MotionDown)
@@ -502,9 +502,8 @@ func (m Model) handleTreeNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.loadSelectedIfChanged()
 }
 
-// handleTOCNav handles navigation keys when the TOC pane is focused.
-func (m Model) handleTOCNav(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	action := m.keymap.Resolve(msg.String())
+// handleTOCNav handles navigation actions when the TOC pane is focused.
+func (m Model) handleTOCNav(action keymap.Action) (tea.Model, tea.Cmd) {
 	switch action {
 	case keymap.ActionDown:
 		m.file.mdTOC.Move(sidepane.MotionDown)
