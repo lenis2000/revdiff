@@ -1,5 +1,16 @@
 # Changelog
 
+## v0.25.1 - 2026-04-24
+
+### Improvements
+
+- inline vim-motion mention in themes & keybindings card 29aa0f6
+- add Vim motions feature card to site landing page b7465f0
+
+### Bug Fixes
+
+- persist theme into Application Options section #149 @umputun
+
 ## v0.25.0 - 2026-04-23
 
 ### New Features
