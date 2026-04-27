@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -59,7 +60,7 @@ const (
 	ActionHelp             Action = "help"
 	ActionDismiss          Action = "dismiss"
 	ActionThemeSelect      Action = "theme_select"
-	ActionCommitInfo       Action = "commit_info"
+	ActionInfo             Action = "info"
 	ActionReload           Action = "reload"
 )
 
@@ -80,13 +81,62 @@ var validActions = map[Action]bool{
 	ActionToggleLineNums: true, ActionToggleBlame: true, ActionToggleWordDiff: true, ActionToggleHunk: true,
 	ActionMarkReviewed: true, ActionFilter: true, ActionToggleUntracked: true,
 	ActionQuit: true, ActionDiscardQuit: true, ActionHelp: true, ActionDismiss: true, ActionThemeSelect: true,
-	ActionCommitInfo: true,
-	ActionReload:     true,
+	ActionInfo:   true,
+	ActionReload: true,
 }
 
-// IsValidAction returns true if the action name is recognized.
+// deprecatedActionAliases maps obsolete action names parsed from user
+// keybinding files onto their canonical replacement. The action was renamed
+// from "commit_info" to "info" when the popup expanded to cover description
+// and aggregate stats; honoring the old name lets pre-existing
+// ~/.config/revdiff/keybindings files keep working without manual edits.
+// The parser surfaces a single [WARN] per deprecated alias for the lifetime
+// of the process (see warnOnceDeprecatedAlias) so that a file with several
+// "map ... commit_info" lines does not spam the log.
+var deprecatedActionAliases = map[Action]Action{
+	"commit_info": ActionInfo,
+}
+
+// IsValidAction returns true if the action name is recognized. Deprecated
+// aliases also report true so the parser accepts them; resolveAction performs
+// the rewrite to the canonical name before storage.
 func IsValidAction(a Action) bool {
-	return validActions[a]
+	if validActions[a] {
+		return true
+	}
+	_, ok := deprecatedActionAliases[a]
+	return ok
+}
+
+// resolveAction returns the canonical Action for a, rewriting any deprecated
+// alias to its replacement. ok is false when a is neither a valid action nor a
+// known alias. Returns the canonical action plus a deprecated flag so callers
+// can surface a one-time warning to the user.
+func resolveAction(a Action) (canonical Action, deprecated, ok bool) {
+	if validActions[a] {
+		return a, false, true
+	}
+	if alias, found := deprecatedActionAliases[a]; found {
+		return alias, true, true
+	}
+	return "", false, false
+}
+
+// loggedDeprecatedAliases tracks which deprecated aliases have already
+// surfaced a [WARN] line during the program's lifetime. Process-wide so a
+// keybindings file with several occurrences of "map i commit_info" produces
+// exactly one warning instead of one per line; mirrors the behavior promised
+// by the PR introducing the alias.
+var loggedDeprecatedAliases sync.Map
+
+// warnOnceDeprecatedAlias logs a deprecation warning the first time alias is
+// observed in the running process. Subsequent calls with the same alias are
+// no-ops. Called from parse() when resolveAction reports deprecated=true.
+func warnOnceDeprecatedAlias(alias, canonical Action) {
+	if _, loaded := loggedDeprecatedAliases.LoadOrStore(string(alias), struct{}{}); loaded {
+		return
+	}
+	log.Printf("[WARN] keybindings: action %q is deprecated, use %q", alias, canonical)
 }
 
 // HelpEntry describes a single action for the help overlay.
@@ -168,7 +218,7 @@ func defaultDescriptions() []HelpEntry {
 		{ActionMarkReviewed, "mark file as reviewed", "View"},
 		{ActionFilter, "filter files", "View"},
 		{ActionThemeSelect, "theme selector", "View"},
-		{ActionCommitInfo, "show commit info for the current range", "View"},
+		{ActionInfo, "show review info popup", "View"},
 		{ActionReload, "reload diff from VCS", "View"},
 
 		// quit
@@ -223,7 +273,7 @@ func defaultBindings() map[string]Action {
 		"Q":      ActionDiscardQuit,
 		"?":      ActionHelp,
 		"T":      ActionThemeSelect,
-		"i":      ActionCommitInfo,
+		"i":      ActionInfo,
 		"R":      ActionReload,
 		"esc":    ActionDismiss,
 	}
@@ -383,7 +433,7 @@ func (km *Keymap) Dump(w io.Writer) error {
 		for _, entry := range sec.Entries {
 			keys := km.KeysFor(entry.Action)
 			for _, k := range keys {
-				if _, err := fmt.Fprintf(w, "map %s %s\n", dumpKeyName(k), entry.Action); err != nil {
+				if _, err := fmt.Fprintf(w, "map %s %s\n", km.dumpKeyName(k), entry.Action); err != nil {
 					return fmt.Errorf("dump keybindings: %w", err)
 				}
 			}
@@ -402,9 +452,9 @@ var reverseAliases = map[string]string{
 // keys that are whitespace-only need special handling so the output can be reloaded.
 // chord keys are split on ">" and each half is dumped independently so that an embedded
 // literal space in either half is rewritten to its "space" alias, preserving the round-trip.
-func dumpKeyName(key string) string {
+func (km *Keymap) dumpKeyName(key string) string {
 	if leader, second, ok := strings.Cut(key, ">"); ok {
-		return dumpKeyName(leader) + ">" + dumpKeyName(second)
+		return km.dumpKeyName(leader) + ">" + km.dumpKeyName(second)
 	}
 	if alias, ok := reverseAliases[key]; ok {
 		return alias
@@ -508,10 +558,14 @@ func parse(r io.Reader) (maps []mapEntry, unmaps []string, err error) {
 				continue
 			}
 			rawKey := fields[1]
-			action := Action(fields[2])
-			if !IsValidAction(action) {
-				log.Printf("[WARN] keybindings:%d: unknown action %q, skipping", lineNum, action)
+			rawAction := Action(fields[2])
+			action, deprecated, ok := resolveAction(rawAction)
+			if !ok {
+				log.Printf("[WARN] keybindings:%d: unknown action %q, skipping", lineNum, rawAction)
 				continue
+			}
+			if deprecated {
+				warnOnceDeprecatedAlias(rawAction, action)
 			}
 			if strings.Contains(rawKey, ">") && rawKey != ">" {
 				key, ok := parseChordKey(rawKey, lineNum)

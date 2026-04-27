@@ -43,10 +43,10 @@ func (h *Hg) UntrackedFiles() ([]string, error) {
 // hgStatusRe matches hg status output lines: "M path/to/file" or "? path/to/file".
 var hgStatusRe = regexp.MustCompile(`^([MAR?!]) (.+)$`)
 
-// hgStatusToFileStatus converts an hg status letter to a FileStatus.
+// statusToFileStatus converts an hg status letter to a FileStatus.
 // hg uses "R" for removed (not renamed), mapping to FileDeleted.
 // returns empty string for unknown or skipped statuses.
-func (h *Hg) hgStatusToFileStatus(status string) FileStatus {
+func (h *Hg) statusToFileStatus(status string) FileStatus {
 	switch FileStatus(status) {
 	case FileModified:
 		return FileModified
@@ -99,7 +99,7 @@ func (h *Hg) parseStatus(out string) []FileEntry {
 			continue
 		}
 		status, path := m[1], m[2]
-		fs := h.hgStatusToFileStatus(status)
+		fs := h.statusToFileStatus(status)
 		if fs == "" {
 			continue
 		}
@@ -117,8 +117,8 @@ func (h *Hg) revFlag(flag, ref string) []string {
 
 	// check triple-dot first so "A...B" isn't mis-split on ".."
 	if left, right, ok := strings.Cut(ref, "..."); ok {
-		l := translateRef(left)
-		r := translateRef(right)
+		l := h.translateRef(left)
+		r := h.translateRef(right)
 		if l == "" {
 			l = "0"
 		}
@@ -129,8 +129,8 @@ func (h *Hg) revFlag(flag, ref string) []string {
 	}
 
 	if left, right, ok := strings.Cut(ref, ".."); ok {
-		l := translateRef(left)
-		r := translateRef(right)
+		l := h.translateRef(left)
+		r := h.translateRef(right)
 		if l == "" {
 			l = "0"
 		}
@@ -140,7 +140,7 @@ func (h *Hg) revFlag(flag, ref string) []string {
 		return []string{flag, l, flag, r}
 	}
 
-	return []string{flag, translateRef(ref)}
+	return []string{flag, h.translateRef(ref)}
 }
 
 // FileDiff returns the diff view for a single file.
@@ -152,7 +152,7 @@ func (h *Hg) FileDiff(ref, file string, _ bool, contextLines int) ([]DiffLine, e
 	args := make([]string, 0, 5+len(rArgs))
 	args = append(args, "diff", "--git", "--color=never")
 	args = append(args, rArgs...)
-	args = append(args, hgContextArg(contextLines), "--", file)
+	args = append(args, unifiedContextArg(contextLines), "--", file)
 
 	out, err := h.runHg(args...)
 	if err != nil {
@@ -187,7 +187,7 @@ func (h *Hg) totalOldLines(ref, file string) int {
 	if left, _, ok := strings.Cut(oldRef, ".."); ok {
 		oldRef = left
 	}
-	oldRef = translateRef(oldRef)
+	oldRef = h.translateRef(oldRef)
 	if oldRef == "" {
 		oldRef = "."
 	}
@@ -198,19 +198,9 @@ func (h *Hg) totalOldLines(ref, file string) int {
 	return countLines(out)
 }
 
-// hgContextArg returns the -U argument for hg diff given the caller's requested
-// context size. A non-positive contextLines or one at or above fullContextSentinel
-// returns the full-file arg; any other value returns -U<contextLines>.
-func hgContextArg(contextLines int) string {
-	if contextLines <= 0 || contextLines >= fullContextSentinel {
-		return fullFileContext
-	}
-	return fmt.Sprintf("-U%d", contextLines)
-}
-
 // translateRef converts git-style refs to mercurial revset syntax.
 // HEAD -> ".", HEAD~N -> ".~N", HEAD^ -> ".^", HEAD^N (N>1) -> "pN(.)".
-func translateRef(ref string) string {
+func (h *Hg) translateRef(ref string) string {
 	switch {
 	case ref == "HEAD":
 		return "."
@@ -239,7 +229,7 @@ func translateRef(ref string) string {
 //
 // The result is capped at MaxCommits entries. Callers should treat a result of
 // exactly MaxCommits length as potentially truncated and signal that to the
-// user via CommitInfoSpec.Truncated.
+// user via overlay.InfoSpec.Truncated.
 //
 // Author, Subject, and Body are sanitized (ANSI escape sequences, C0/DEL/C1
 // control bytes, and VCS framing delimiters stripped) to neutralize terminal
@@ -269,15 +259,15 @@ func (h *Hg) commitLogRevset(ref string) string {
 		l, r := h.rangeEnds(left, right)
 		return fmt.Sprintf("%s::%s - %s", l, r, l)
 	}
-	r := translateRef(ref)
+	r := h.translateRef(ref)
 	return r + "::. - " + r
 }
 
 // rangeEnds translates both sides of a range expression via translateRef,
 // defaulting empty left to "0" (repo root) and empty right to "." (working copy parent).
 func (h *Hg) rangeEnds(left, right string) (string, string) {
-	l := translateRef(left)
-	r := translateRef(right)
+	l := h.translateRef(left)
+	r := h.translateRef(right)
 	if l == "" {
 		l = "0"
 	}
@@ -309,9 +299,9 @@ func (h *Hg) parseCommitLog(raw string) []CommitInfo {
 		subject, body := splitCommitDesc(fields[3])
 		ci := CommitInfo{
 			Hash:    fields[0],
-			Author:  sanitizeCommitText(fields[1]),
-			Subject: sanitizeCommitText(subject),
-			Body:    sanitizeCommitText(body),
+			Author:  SanitizeCommitText(fields[1]),
+			Subject: SanitizeCommitText(subject),
+			Body:    SanitizeCommitText(body),
 		}
 		if t, err := time.Parse(time.RFC3339, fields[2]); err == nil {
 			ci.Date = t

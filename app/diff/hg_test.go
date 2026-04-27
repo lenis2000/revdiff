@@ -34,6 +34,7 @@ func hgCmd(t *testing.T, dir string, args ...string) {
 }
 
 func TestTranslateRef(t *testing.T) {
+	h := &Hg{}
 	tests := []struct {
 		name string
 		ref  string
@@ -52,7 +53,7 @@ func TestTranslateRef(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, translateRef(tt.ref))
+			assert.Equal(t, tt.want, h.translateRef(tt.ref))
 		})
 	}
 }
@@ -429,28 +430,7 @@ func TestHg_StatusToFileStatus(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.status, func(t *testing.T) {
-			assert.Equal(t, tt.want, h.hgStatusToFileStatus(tt.status))
-		})
-	}
-}
-
-func TestHgContextArg(t *testing.T) {
-	tests := []struct {
-		name         string
-		contextLines int
-		want         string
-	}{
-		{name: "zero requests full file", contextLines: 0, want: "-U1000000"},
-		{name: "five", contextLines: 5, want: "-U5"},
-		{name: "one", contextLines: 1, want: "-U1"},
-		{name: "just below sentinel", contextLines: 999999, want: "-U999999"},
-		{name: "exact sentinel returns full file", contextLines: 1000000, want: "-U1000000"},
-		{name: "above sentinel returns full file", contextLines: 1000001, want: "-U1000000"},
-		{name: "negative returns full file", contextLines: -1, want: "-U1000000"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, hgContextArg(tt.contextLines))
+			assert.Equal(t, tt.want, h.statusToFileStatus(tt.status))
 		})
 	}
 }

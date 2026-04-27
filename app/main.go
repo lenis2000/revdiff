@@ -98,6 +98,7 @@ func run(opts options) error {
 		blamer       ui.Blamer
 		untrackedFn  func() ([]string, error)
 		commitLogger diff.CommitLogger
+		vcsType      diff.VCSType
 		err          error
 	)
 
@@ -105,6 +106,11 @@ func run(opts options) error {
 	if !opts.NoMouse {
 		programOptions = append(programOptions, tea.WithMouseCellMotion())
 	}
+	description, err := resolveDescription(opts)
+	if err != nil {
+		return err
+	}
+
 	if opts.Stdin {
 		var tty *os.File
 		renderer, tty, err = prepareStdinMode(opts, os.Stdin)
@@ -125,6 +131,7 @@ func run(opts options) error {
 		blamer = setup.blamer
 		untrackedFn = setup.untrackedFn
 		commitLogger = setup.commitLogger
+		vcsType = setup.vcsType
 	}
 
 	if opts.Annotations != "" {
@@ -178,13 +185,18 @@ func run(opts options) error {
 		ShowBlame:         opts.Blame,
 		WordDiff:          opts.WordDiff,
 		VimMotion:         opts.VimMotion,
-		TabWidth:          opts.TabWidth,
-		Ref:               opts.ref(),
-		Staged:            opts.Staged,
-		TreeWidthRatio:    opts.TreeWidth,
-		Only:              opts.Only,
-		WorkDir:           workDir,
-		ActiveThemeName:   themes.catalog.ActiveName(opts.Theme),
+		ReviewInfo: reviewInfoFromOptions(opts, reviewInfoInputs{
+			workDir:     workDir,
+			vcsType:     vcsType,
+			description: description,
+		}),
+		TabWidth:        opts.TabWidth,
+		Ref:             opts.ref(),
+		Staged:          opts.Staged,
+		TreeWidthRatio:  opts.TreeWidth,
+		Only:            opts.Only,
+		WorkDir:         workDir,
+		ActiveThemeName: themes.catalog.ActiveName(opts.Theme),
 		NewFileTree: func(entries []diff.FileEntry) ui.FileTreeComponent {
 			return sidepane.NewFileTree(entries)
 		},
@@ -237,8 +249,8 @@ func reloadApplicable(opts options) bool {
 	return !opts.Stdin
 }
 
-// commitsApplicable returns true when the current invocation can show a
-// commit-info popup: a VCS-backed log source must be present and the mode
+// commitsApplicable returns true when the unified info popup can include a
+// commit-log section: a VCS-backed log source must be present and the mode
 // must be ref-based (no stdin, staged, all-files, or empty ref). Computed
 // once in the composition root so the Model does not re-derive from CLI
 // flags. --only is fine when combined with a ref in a real repo; the empty
