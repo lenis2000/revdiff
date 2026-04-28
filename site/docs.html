@@ -7,12 +7,12 @@
     <meta name="description" content="revdiff documentation: installation, pi package, Claude Code plugin, Codex plugin, OpenCode integration, usage, configuration, themes, keybindings, and output format. Code review and plan review tool for AI coding sessions.">
     <meta name="keywords" content="code review for ai agents, code review for claude code, plan review for claude code, revdiff docs, tui diff viewer documentation">
     <meta name="author" content="umputun">
-    <link rel="canonical" href="https://revdiff.com/docs.html">
+    <link rel="canonical" href="https://revdiff.com/docs">
 
     <meta property="og:title" content="revdiff Documentation — Code Review for AI Agents">
     <meta property="og:description" content="Complete reference for revdiff: usage, configuration, themes, keybindings, pi package, Claude Code plugin, Codex plugin, OpenCode integration, and output format.">
     <meta property="og:type" content="article">
-    <meta property="og:url" content="https://revdiff.com/docs.html">
+    <meta property="og:url" content="https://revdiff.com/docs">
     <meta property="og:image" content="https://revdiff.com/assets/screenshot.png">
 
     <meta name="twitter:card" content="summary_large_image">
@@ -24,9 +24,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="96x96" href="assets/favicon-96x96.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -34,7 +33,7 @@
 <nav class="nav">
     <div class="nav-inner">
         <a href="/" class="nav-logo">
-            <img src="assets/icon.png" alt="revdiff" width="28" height="28">
+            <img src="assets/icon.png" alt="" width="28" height="28">
             <span>revdiff</span>
         </a>
         <div class="nav-links">
@@ -62,6 +61,7 @@
         <a href="#all-files">All-files mode</a>
         <a href="#context-only">Context-only review</a>
         <a href="#scratch-buffer">Scratch-buffer review</a>
+        <a href="#description">Review description</a>
         <a href="#markdown-toc">Markdown TOC</a>
         <a href="#beyond-code-review">Beyond code review</a>
         <a href="#zed-integration">Zed integration</a>
@@ -81,7 +81,9 @@
         <a href="#view">View toggles</a>
         <a href="#vim-controls">Vim-style controls</a>
         <a href="#status-bar-icons">Status bar icons</a>
+        <a href="#mouse-support">Mouse support</a>
         <a href="#custom-keys">Custom keybindings</a>
+        <a href="#vim-motion">Vim-motion preset</a>
 
         <h4>Claude Code plugin</h4>
         <a href="#plugin-install">Installation</a>
@@ -202,7 +204,13 @@ revdiff --only=docs/notes.txt
 printf '# Plan\n\nBody\n' | revdiff --stdin --stdin-name plan.md
 
 <span class="code-comment"># capture annotations from generated output</span>
-some-command | revdiff --stdin --output /tmp/annotations.txt</code></div>
+some-command | revdiff --stdin --output /tmp/annotations.txt
+
+<span class="code-comment"># round-trip: capture, edit externally, reload</span>
+revdiff -o review.md HEAD~1
+$EDITOR review.md
+revdiff --annotations=review.md HEAD~1</code></div>
+        <p><code>--annotations</code> reads the same markdown format that <code>-o</code> writes (see <a href="#output-format">Output format</a>), so any file revdiff produces can be loaded back. You can also hand-author or generate that file from any other source &mdash; each record is <code>## path/to/file.go:LINE (+)</code> followed by the comment body &mdash; then step through the comments inline against the actual diff, edit or delete them in the TUI, and quit with <code>q</code> to write the final set to stdout (or to <code>-o</code>).</p>
 
         <h2 id="all-files">All-files mode</h2>
         <p>Use <code>--all-files</code> (or <code>-A</code>) to browse all tracked files, not just files with changes. This turns revdiff into a general-purpose code annotation tool. All files are shown in context-only mode with full annotation and syntax highlighting support.</p>
@@ -222,11 +230,22 @@ revdiff --all-files --exclude vendor --exclude mocks</code></div>
 
         <h2 id="scratch-buffer">Scratch-buffer review</h2>
         <p>Use <code>--stdin</code> to review arbitrary piped or redirected text as a single synthetic file. All lines are treated as context, so the normal single-file review flow still works: annotations, file-level notes, search, wrap, collapsed mode, and structured output.</p>
-        <p><code>--stdin</code> is explicit, requires piped or redirected input, and is mutually exclusive with refs, <code>--staged</code>, <code>--only</code>, <code>--all-files</code>, <code>--include</code>, and <code>--exclude</code>.</p>
+        <p><code>--stdin</code> is explicit, requires piped or redirected input, and is mutually exclusive with refs, <code>--staged</code>, <code>--only</code>, <code>--all-files</code>, <code>--include</code>, <code>--exclude</code>, and <code>--annotations</code>.</p>
         <p>Use <code>--stdin-name</code> to control the synthetic filename for annotation output and extension-based highlighting or markdown TOC activation.</p>
         <div class="code-block"><code>echo "plain text" | revdiff --stdin
 printf '# Plan\n\nBody\n' | revdiff --stdin --stdin-name plan.md
 git show HEAD~1:README.md | revdiff --stdin --stdin-name README.md</code></div>
+
+        <h2 id="description">Review description</h2>
+        <p>Use <code>--description</code> (or <code>--description-file=path.md</code>) to attach prose context to a review. The text is rendered at the top of the info popup (<code>i</code> key) using the same markdown-highlighting path as <code>.md</code> files in the diff view. Useful when an agent or a script launches revdiff on your behalf and you come back to it later — the popup tells you what the change is and why.</p>
+        <div class="code-block"><code>revdiff HEAD~3 --description="# Refactor auth middleware
+
+Drop session-token storage to meet new compliance requirements.
+See ticket SEC-441 for context."
+
+# longer descriptions: keep the markdown in a file
+revdiff HEAD~3 --description-file=.review-description.md</code></div>
+        <p><code>--description</code> and <code>--description-file</code> are mutually exclusive. The description section is hidden when neither is set, so the flag is purely additive.</p>
 
         <h2 id="markdown-toc">Markdown TOC navigation</h2>
         <p>When reviewing a single markdown file in context-only mode, a table-of-contents pane appears on the left listing all markdown headers. This works for <code>--only</code> files and for <code>--stdin</code> when <code>--stdin-name</code> ends with <code>.md</code> or <code>.markdown</code>. Use <code>Tab</code> to switch focus, <code>j</code>/<code>k</code> to navigate, <code>Enter</code> to jump. The TOC highlights the current section as you scroll. Headers inside fenced code blocks are excluded.</p>
@@ -293,14 +312,22 @@ revdiff --only=/tmp/draft-comment.md</code></div>
             <figure class="zed-gallery-item">
                 <div class="terminal-frame">
                     <div class="terminal-dots"><span></span><span></span><span></span></div>
-                    <img src="assets/zed-gitdiff.png" alt="Reviewing a README diff in Zed's integrated terminal">
+                    <picture>
+                        <source srcset="assets/zed-gitdiff.avif" type="image/avif">
+                        <source srcset="assets/zed-gitdiff.webp" type="image/webp">
+                        <img src="assets/zed-gitdiff.png" alt="Reviewing a README diff in Zed's integrated terminal" width="1096" height="837" loading="lazy">
+                    </picture>
                 </div>
                 <figcaption>Reviewing uncommitted changes — revdiff runs as a Zed terminal tab with full syntax highlighting and annotation support</figcaption>
             </figure>
             <figure class="zed-gallery-item">
                 <div class="terminal-frame">
                     <div class="terminal-dots"><span></span><span></span><span></span></div>
-                    <img src="assets/zed-planreview.png" alt="Reviewing an implementation plan in revdiff inside Zed">
+                    <picture>
+                        <source srcset="assets/zed-planreview.avif" type="image/avif">
+                        <source srcset="assets/zed-planreview.webp" type="image/webp">
+                        <img src="assets/zed-planreview.png" alt="Reviewing an implementation plan in revdiff inside Zed" width="1117" height="767" loading="lazy">
+                    </picture>
                 </div>
                 <figcaption>Reviewing a plan file — file tree, line annotations, and structured output all work inside the editor tab</figcaption>
             </figure>
@@ -337,6 +364,8 @@ revdiff --dump-config > ~/.config/revdiff/config</code></div>
                 <tr><td><code>--line-numbers</code></td><td>Show line numbers in diff gutter</td><td><code>false</code></td></tr>
                 <tr><td><code>--word-diff</code></td><td>Highlight intra-line word-level changes in paired add/remove lines</td><td><code>false</code></td></tr>
                 <tr><td><code>--no-confirm-discard</code></td><td>Skip discard confirmation</td><td><code>false</code></td></tr>
+                <tr><td><code>--no-mouse</code></td><td>Disable mouse support (scroll wheel, click)</td><td><code>false</code></td></tr>
+                <tr><td><code>--vim-motion</code></td><td>Enable vim-style motion preset (counts, <code>gg</code>, <code>G</code>, <code>zz</code>/<code>zt</code>/<code>zb</code>, <code>ZZ</code>/<code>ZQ</code>)</td><td><code>false</code></td></tr>
                 <tr><td><code>--chroma-style</code></td><td>Syntax highlighting theme</td><td><code>catppuccin-macchiato</code></td></tr>
                 <tr><td><code>--theme</code></td><td>Load color theme from <code>~/.config/revdiff/themes/</code></td><td></td></tr>
                 <tr><td><code>--dump-theme</code></td><td>Print resolved colors as theme file and exit</td><td></td></tr>
@@ -347,10 +376,13 @@ revdiff --dump-config > ~/.config/revdiff/config</code></div>
                 <tr><td><code>-A, --all-files</code></td><td>Browse all tracked files (git and jj only)</td><td><code>false</code></td></tr>
                 <tr><td><code>--stdin</code></td><td>Review stdin as a scratch buffer</td><td><code>false</code></td></tr>
                 <tr><td><code>--stdin-name</code></td><td>Synthetic file name for stdin content</td><td><code>scratch-buffer</code></td></tr>
+                <tr><td><code>--description</code></td><td>Prose context shown in the info popup (markdown)</td><td></td></tr>
+                <tr><td><code>--description-file</code></td><td>Read the info-popup description from this file (markdown)</td><td></td></tr>
                 <tr><td><code>-I, --include</code></td><td>Include only files matching prefix (repeatable)</td><td></td></tr>
                 <tr><td><code>-X, --exclude</code></td><td>Exclude files by prefix (repeatable)</td><td></td></tr>
                 <tr><td><code>-F, --only</code></td><td>Show only matching files</td><td></td></tr>
                 <tr><td><code>-o, --output</code></td><td>Write annotations to file</td><td></td></tr>
+                <tr><td><code>--annotations</code></td><td>Preload annotations from a markdown file in <code>-o</code> format</td><td></td></tr>
                 <tr><td><code>--history-dir</code></td><td>Directory for review history auto-saves</td><td><code>~/.config/revdiff/history/</code></td></tr>
                 <tr><td><code>--keys</code></td><td>Path to keybindings file</td><td><code>~/.config/revdiff/keybindings</code></td></tr>
                 <tr><td><code>--dump-keys</code></td><td>Print effective keybindings and exit</td><td></td></tr>
@@ -481,7 +513,7 @@ color-border = #6272a4
                 <tr><td><code>T</code></td><td>Theme selector with live preview</td></tr>
                 <tr><td><code>f</code></td><td>Filter: all files / annotated only</td></tr>
                 <tr><td><code>?</code></td><td>Help overlay</td></tr>
-                <tr><td><code>i</code></td><td>Commit info popup (subject + body of commits in the current ref range; git/hg/jj only)</td></tr>
+                <tr><td><code>i</code></td><td>Info popup &mdash; review scope (mode, VCS, ref, filters, file/status counts, aggregate <code>+/-</code> stats) plus the commit log for the current ref range when applicable</td></tr>
                 <tr><td><code>R</code></td><td>Reload diff from VCS (warns if annotations exist)</td></tr>
                 <tr><td><code>q</code></td><td>Quit, output annotations</td></tr>
                 <tr><td><code>Q</code></td><td>Discard annotations and quit</td></tr>
@@ -525,6 +557,28 @@ color-border = #6272a4
         </table>
         <p>On narrow terminals, the left-hand segments are dropped before the icons: search position first, then line and hunk info, then the filename truncates. The icon row on the right stays put.</p>
 
+        <h2 id="mouse-support">Mouse support</h2>
+        <p>revdiff enables mouse tracking by default so the scroll wheel and left-click work consistently across terminals.</p>
+        <ul>
+            <li><strong>Scroll wheel</strong> &mdash; scrolls whichever pane the cursor is over (tree/TOC or diff). Three lines per notch.</li>
+            <li><strong>Shift+scroll</strong> &mdash; half-page scroll in whichever pane the cursor is over.</li>
+            <li><strong>Left-click in the tree</strong> &mdash; focuses the tree and selects/loads the clicked entry (same as pressing <code>j</code>/<code>k</code> to land there). Clicking a directory row moves the cursor but does not load a file.</li>
+            <li><strong>Left-click in the diff</strong> &mdash; focuses the diff and moves the cursor to the clicked line. Enables a &ldquo;click, then <code>a</code>&rdquo; annotation flow.</li>
+            <li><strong>Left-click in the TOC pane</strong> (single-file markdown) &mdash; focuses the TOC and selects the clicked header.</li>
+            <li><strong>Scroll wheel in overlay popups</strong> (info, annotations, themes) &mdash; scrolls the popup content or moves its cursor. Shift+wheel uses a half-page step. In the theme selector, wheel previews each theme live. Help overlay has no scrollable or selectable content so mouse events are ignored.</li>
+            <li><strong>Left-click in the annotation popup</strong> &mdash; jumps to the clicked annotation (same as pressing <code>Enter</code>).</li>
+            <li><strong>Left-click in the theme popup</strong> &mdash; confirms the clicked theme (same as pressing <code>Enter</code>). Clicks on the filter row or blank separator are ignored.</li>
+        </ul>
+        <p>Horizontal wheel, right-click, middle-click, drag selection, and clicks on the status bar or diff header are intentionally ignored. Clicks outside an open overlay are swallowed &mdash; dismiss an overlay with <code>Esc</code> or its toggle key. Modal states (annotation input, search input, confirm discard, reload confirm) swallow mouse events entirely.</p>
+        <p><strong>Text selection trade-off</strong> &mdash; once mouse tracking is on, plain drag is captured by revdiff. For terminal-native text selection:</p>
+        <ul>
+            <li><strong>kitty</strong>: hold <code>Ctrl+Shift</code> while dragging</li>
+            <li><strong>iTerm2</strong>: hold <code>Option</code> while dragging</li>
+            <li><strong>most other terminals</strong>: hold <code>Shift</code> while dragging</li>
+        </ul>
+        <p>Because the tree pane is rendered alongside the diff on the same rows, multi-line Shift+drag will include tree content. For clean copies of diff text, use your terminal's block-select mode (Option+drag in iTerm2, Ctrl+Shift+drag in kitty) or run with <code>--no-mouse</code> to disable mouse capture entirely.</p>
+        <p>Opt out with <code>--no-mouse</code>, <code>REVDIFF_NO_MOUSE=true</code>, or <code>no-mouse = true</code> in the config file.</p>
+
         <h2 id="custom-keys">Custom keybindings</h2>
         <p>All keybindings can be customized via <code>~/.config/revdiff/keybindings</code>. Override path with <code>--keys</code> or <code>REVDIFF_KEYS</code>.</p>
         <div class="code-block"><code><span class="code-comment"># ~/.config/revdiff/keybindings</span>
@@ -534,14 +588,39 @@ map x quit
 unmap q</code></div>
         <p>Generate a template: <code>revdiff --dump-keys > ~/.config/revdiff/keybindings</code></p>
         <p>Modal keys (annotation input, search input, confirm discard) are not remappable.</p>
+        <h3>Chord bindings (ctrl/alt leader)</h3>
+        <p>Bind a two-stage chord by joining the leader and second key with <code>&gt;</code>. The leader must be a <code>ctrl+*</code> or <code>alt+*</code> combo; the second stage is any single key. Only two stages are supported.</p>
+        <div class="code-block"><code>map ctrl+w&gt;x mark_reviewed
+map alt+t&gt;n theme_select</code></div>
+        <p>When the leader is pressed, the status bar shows <code>Pending: ctrl+w, esc to cancel</code>; press the second key to dispatch, or <code>esc</code> to cancel silently. Binding a key as both a standalone action and a chord prefix drops the standalone binding (the chord wins, with a warning). Chord bindings work under non-Latin keyboard layouts &mdash; the second-stage key is translated via the same layout-resolve fallback as single-key bindings.</p>
+        <p><strong>macOS note:</strong> <code>alt+*</code> leaders require your terminal to send Option as Meta/Alt. Most terminals default to &quot;Option composes special characters&quot; (e.g. <code>Option+T</code> &rarr; <code>&dagger;</code>), in which case Alt chords silently won&apos;t fire. To enable: iTerm2 &rarr; <em>Profiles &rarr; Keys &rarr; Left/Right Option key &rarr; <code>Esc+</code></em>; Terminal.app &rarr; <em>Profiles &rarr; Keyboard &rarr; Use Option as Meta key</em>; Kitty &rarr; <code>macos_option_as_alt yes</code>; Ghostty &rarr; <code>macos-option-as-alt = true</code>. If you&apos;d rather not touch terminal settings, use <code>ctrl+*</code> leaders &mdash; those work everywhere with no configuration.</p>
         <h3>Available actions</h3>
-        <p><strong>Navigation:</strong> <code>down</code>, <code>up</code>, <code>page_down</code>, <code>page_up</code>, <code>half_page_down</code>, <code>half_page_up</code>, <code>home</code>, <code>end</code>, <code>scroll_left</code>, <code>scroll_right</code></p>
+        <p><strong>Navigation:</strong> <code>down</code>, <code>up</code>, <code>page_down</code>, <code>page_up</code>, <code>half_page_down</code>, <code>half_page_up</code>, <code>home</code>, <code>end</code>, <code>scroll_left</code>, <code>scroll_right</code>, <code>scroll_center</code>, <code>scroll_top</code>, <code>scroll_bottom</code></p>
         <p><strong>File/Hunk:</strong> <code>next_item</code>, <code>prev_item</code>, <code>next_hunk</code>, <code>prev_hunk</code></p>
         <p><strong>Pane:</strong> <code>toggle_pane</code>, <code>focus_tree</code>, <code>focus_diff</code></p>
         <p><strong>Search:</strong> <code>search</code></p>
         <p><strong>Annotations:</strong> <code>confirm</code>, <code>annotate_file</code>, <code>delete_annotation</code>, <code>annot_list</code></p>
-        <p><strong>View:</strong> <code>toggle_collapsed</code>, <code>toggle_compact</code>, <code>toggle_wrap</code>, <code>toggle_tree</code>, <code>toggle_line_numbers</code>, <code>toggle_blame</code>, <code>toggle_word_diff</code>, <code>toggle_hunk</code>, <code>toggle_untracked</code>, <code>mark_reviewed</code>, <code>theme_select</code>, <code>filter</code>, <code>commit_info</code>, <code>reload</code></p>
+        <p><strong>View:</strong> <code>toggle_collapsed</code>, <code>toggle_compact</code>, <code>toggle_wrap</code>, <code>toggle_tree</code>, <code>toggle_line_numbers</code>, <code>toggle_blame</code>, <code>toggle_word_diff</code>, <code>toggle_hunk</code>, <code>toggle_untracked</code>, <code>mark_reviewed</code>, <code>theme_select</code>, <code>filter</code>, <code>info</code>, <code>reload</code></p>
         <p><strong>Quit:</strong> <code>quit</code>, <code>discard_quit</code>, <code>help</code>, <code>dismiss</code></p>
+
+        <h2 id="vim-motion">Vim-motion preset</h2>
+        <p>Opt-in vim-style motion layer activated via <code>--vim-motion</code>, <code>REVDIFF_VIM_MOTION=true</code>, or <code>vim-motion = true</code> in the config file. Off by default &mdash; when off, existing single-key bindings are unchanged.</p>
+        <table>
+            <thead><tr><th>Keys</th><th>Action</th></tr></thead>
+            <tbody>
+                <tr><td><code>&lt;N&gt;j</code> / <code>&lt;N&gt;k</code></td><td>Move cursor N lines down/up (diff pane, 1-9999)</td></tr>
+                <tr><td><code>gg</code></td><td>Jump to first line (diff pane)</td></tr>
+                <tr><td><code>G</code></td><td>Jump to last line (diff pane)</td></tr>
+                <tr><td><code>&lt;N&gt;G</code></td><td>Goto line N (diff pane)</td></tr>
+                <tr><td><code>zz</code></td><td>Center viewport on cursor (diff pane)</td></tr>
+                <tr><td><code>zt</code></td><td>Align viewport top on cursor (diff pane)</td></tr>
+                <tr><td><code>zb</code></td><td>Align viewport bottom on cursor (diff pane)</td></tr>
+                <tr><td><code>ZZ</code></td><td>Quit (any pane)</td></tr>
+                <tr><td><code>ZQ</code></td><td>Discard annotations and quit (any pane)</td></tr>
+            </tbody>
+        </table>
+        <p>When the preset is on, the digits <code>0</code>-<code>9</code> and the leader keys <code>g</code>, <code>z</code>, <code>Z</code> are intercepted before the regular keymap, so any standalone binding on those keys is overridden while the flag is active. <code>&lt;N&gt;j</code>/<code>&lt;N&gt;k</code>/<code>&lt;N&gt;G</code> and <code>gg</code>/<code>zz</code>/<code>zt</code>/<code>zb</code> apply to the diff pane only &mdash; in the file tree they fall through to the normal bindings. <code>ZZ</code> and <code>ZQ</code> work from any pane. Press <code>Esc</code> to silently cancel a pending leader; an unknown second key surfaces a transient <code>Unknown: &lt;chord&gt;</code> hint in the status bar. A bare digit <code>0</code> is not consumed (falls through to whatever binding is mapped); counts over 9999 are clamped. Modal keys (search input, annotation input, overlay navigation) always take precedence over the interceptor, and <code>ctrl+*</code>/<code>alt+*</code> chord bindings keep working orthogonally.</p>
+        <p>The help overlay (<code>?</code>) shows a dedicated <strong>Vim motion</strong> section listing all eight preset bindings when <code>--vim-motion</code> is on; when off, the section is hidden.</p>
 
         <!-- claude code plugin -->
         <h2 id="plugin-install">Claude Code plugin</h2>
@@ -693,7 +772,7 @@ fi</code></div>
 <footer class="footer">
     <div class="section-inner footer-inner">
         <div class="footer-left">
-            <img src="assets/icon.png" alt="revdiff" width="24" height="24">
+            <img src="assets/icon.png" alt="" width="24" height="24">
             <span>revdiff by <a href="https://umputun.dev">umputun</a></span>
         </div>
         <div class="footer-links">

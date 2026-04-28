@@ -14,10 +14,11 @@ import (
 )
 
 type annotListOverlay struct {
-	items  []AnnotationItem
-	cursor int
-	offset int
-	height int // last known terminal height, updated on render
+	items      []AnnotationItem
+	cursor     int
+	offset     int
+	height     int // last known terminal height, updated on render
+	popupWidth int // last known popup width, updated on render; used by handleLeftClick
 }
 
 func (a *annotListOverlay) open(spec AnnotListSpec) {
@@ -29,6 +30,7 @@ func (a *annotListOverlay) open(spec AnnotListSpec) {
 func (a *annotListOverlay) render(ctx RenderCtx, mgr *Manager) string {
 	a.height = ctx.Height
 	popupWidth := max(min(ctx.Width-10, 70), 20)
+	a.popupWidth = popupWidth
 
 	if len(a.items) == 0 {
 		return a.emptyOverlay(popupWidth, ctx.Resolver, mgr)
@@ -50,7 +52,7 @@ func (a *annotListOverlay) render(ctx RenderCtx, mgr *Manager) string {
 
 	accentFg := string(ctx.Resolver.Color(style.ColorKeyAccentFg))
 	paneBg := string(ctx.Resolver.Color(style.ColorKeyDiffPaneBg))
-	box = mgr.injectBorderTitle(box, title, popupWidth, accentFg, paneBg)
+	box = mgr.injectBorderTitle(box, title, borderEdgeText{popupWidth: popupWidth, accentFg: accentFg, paneBg: paneBg})
 
 	return box
 }
@@ -65,7 +67,7 @@ func (a *annotListOverlay) emptyOverlay(popupWidth int, resolver Resolver, mgr *
 	title := " annotations (0) "
 	accentFg := string(resolver.Color(style.ColorKeyAccentFg))
 	paneBg := string(resolver.Color(style.ColorKeyDiffPaneBg))
-	box = mgr.injectBorderTitle(box, title, popupWidth, accentFg, paneBg)
+	box = mgr.injectBorderTitle(box, title, borderEdgeText{popupWidth: popupWidth, accentFg: accentFg, paneBg: paneBg})
 	return box
 }
 
@@ -154,25 +156,93 @@ func (a *annotListOverlay) handleKey(msg tea.KeyMsg, action keymap.Action) Outco
 
 	switch action {
 	case keymap.ActionUp:
-		if a.cursor > 0 {
-			a.cursor--
-			if a.cursor < a.offset {
-				a.offset = a.cursor
-			}
-		}
+		a.moveCursorBy(-1)
 		return Outcome{Kind: OutcomeNone}
 
 	case keymap.ActionDown:
-		if a.cursor < len(a.items)-1 {
-			a.cursor++
-			maxVis := a.maxVisible(a.height)
-			if a.cursor >= a.offset+maxVis {
-				a.offset = a.cursor - maxVis + 1
-			}
-		}
+		a.moveCursorBy(1)
 		return Outcome{Kind: OutcomeNone}
 
 	default:
 		return Outcome{Kind: OutcomeNone}
 	}
+}
+
+// moveCursorBy shifts the cursor by delta (positive = down, negative = up),
+// clamped to [0, len(items)-1]. offset follows the cursor using the same
+// "scroll by one when cursor leaves the visible window" policy as keyboard
+// navigation.
+func (a *annotListOverlay) moveCursorBy(delta int) {
+	if len(a.items) == 0 {
+		return
+	}
+	target := min(max(a.cursor+delta, 0), len(a.items)-1)
+	a.cursor = target
+	if a.cursor < a.offset {
+		a.offset = a.cursor
+	}
+	maxVis := a.maxVisible(a.height)
+	if a.cursor >= a.offset+maxVis {
+		a.offset = a.cursor - maxVis + 1
+	}
+}
+
+// handleMouse drives the overlay in response to mouse events. plain wheel steps
+// the cursor by one entry (single-notch feel); shift+wheel steps by half the
+// visible page. left-click inside the popup maps the clicked row to an item
+// and returns OutcomeAnnotationChosen for the main model to jump to (same as
+// pressing Enter). coords are popup-local (Manager.HandleMouse translates).
+// non-press actions and other buttons are ignored so the overlay is not
+// dismissed by accidental drag or release events.
+func (a *annotListOverlay) handleMouse(msg tea.MouseMsg) Outcome {
+	if msg.Action != tea.MouseActionPress {
+		return Outcome{Kind: OutcomeNone}
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelDown:
+		a.moveCursorBy(a.wheelStep(msg.Shift))
+		return Outcome{Kind: OutcomeNone}
+	case tea.MouseButtonWheelUp:
+		a.moveCursorBy(-a.wheelStep(msg.Shift))
+		return Outcome{Kind: OutcomeNone}
+	case tea.MouseButtonLeft:
+		return a.handleLeftClick(msg.X, msg.Y)
+	default:
+		return Outcome{Kind: OutcomeNone}
+	}
+}
+
+// wheelStep returns the cursor step for a wheel notch: 1 by default,
+// half the visible page when shift is held.
+func (a *annotListOverlay) wheelStep(shift bool) int {
+	if !shift {
+		return 1
+	}
+	return max(a.maxVisible(a.height)/2, 1)
+}
+
+// handleLeftClick maps popup-local (x, y) to an item row and returns a jump
+// outcome. the popup has a 1-row border + 1-row top padding, and 1-col border
+// + 1-col left/right padding — so the content rectangle is y in [2, h-2) and
+// x in [2, popupWidth-2). clicks outside that rectangle (including the
+// vertical borders and horizontal padding on an item row) are no-ops so
+// users cannot accidentally select by clicking chrome.
+func (a *annotListOverlay) handleLeftClick(localX, localY int) Outcome {
+	const contentTop = 2      // border (1) + top padding (1)
+	const horizChromeCols = 2 // border (1) + side padding (1) on each side
+	if localX < horizChromeCols || localX >= a.popupWidth-horizChromeCols {
+		return Outcome{Kind: OutcomeNone}
+	}
+	relRow := localY - contentTop
+	maxVis := a.maxVisible(a.height)
+	if relRow < 0 || relRow >= maxVis {
+		return Outcome{Kind: OutcomeNone}
+	}
+	itemIdx := a.offset + relRow
+	if itemIdx < 0 || itemIdx >= len(a.items) {
+		return Outcome{Kind: OutcomeNone}
+	}
+	a.cursor = itemIdx
+	target := a.items[itemIdx].AnnotationTarget
+	return Outcome{Kind: OutcomeAnnotationChosen, AnnotationTarget: &target}
 }

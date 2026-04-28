@@ -64,6 +64,14 @@ func (m Model) consumeVimPrefix(msg tea.KeyMsg) (handled bool, model Model, cmd 
 	}
 
 	if isChordStarter(msg) {
+		// defer to the keymap when the key is bound to a standalone action or
+		// registered as an upstream-style leader chord (ctrl+w>x). this lets
+		// users override ctrl+w (and only ctrl+w in practice; g/z/y are not
+		// permitted as chord leaders) without losing HEAD's pane-nav chord
+		// when no override is configured.
+		if m.keymap != nil && (m.keymap.Resolve(msg.String()) != "" || m.keymap.IsChordLeader(msg.String())) {
+			return false, m, nil
+		}
 		m.vim.pendingChord = chordKeyName(msg)
 		return true, m, nil
 	}
@@ -205,8 +213,8 @@ func (m Model) dispatchVimGotoStart() (handled bool, model Model, cmd tea.Cmd) {
 // is copied and the status bar shows "nothing to yank". If the cursor is on
 // an injected annotation row the chord is a silent no-op — the user asked
 // for the diff-line text, not the annotation body. Feedback flows through
-// m.commits.hint, the existing one-render transient hint (the field name is
-// a historical accident; it is the generic status-bar hint slot).
+// m.vim.hint, the transient one-render status-bar slot for vim-related
+// feedback (count/chord display, yank result).
 func (m Model) dispatchVimYankLine(count int) (handled bool, model Model, cmd tea.Cmd) {
 	if m.layout.focus != paneDiff {
 		return true, m, nil
@@ -219,18 +227,18 @@ func (m Model) dispatchVimYankLine(count int) (handled bool, model Model, cmd te
 	}
 	lines := m.collectYankLines(count)
 	if len(lines) == 0 {
-		m.commits.hint = "nothing to yank"
+		m.vim.hint = "nothing to yank"
 		return true, m, nil
 	}
 	payload := strings.Join(lines, "\n")
 	if err := m.clipboard.WriteAll(payload); err != nil {
-		m.commits.hint = fmt.Sprintf("clipboard error: %v", err)
+		m.vim.hint = fmt.Sprintf("clipboard error: %v", err)
 		return true, m, nil
 	}
 	if len(lines) == 1 {
-		m.commits.hint = "yanked line"
+		m.vim.hint = "yanked line"
 	} else {
-		m.commits.hint = fmt.Sprintf("yanked %d lines", len(lines))
+		m.vim.hint = fmt.Sprintf("yanked %d lines", len(lines))
 	}
 	return true, m, nil
 }

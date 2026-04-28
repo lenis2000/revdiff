@@ -196,7 +196,7 @@ func (tc *themeCatalog) Persist(name string) error {
 	if tc.configPath == "" {
 		return nil
 	}
-	return patchConfigTheme(tc.configPath, name)
+	return tc.patchConfigTheme(name)
 }
 
 // optsToStyleColors converts opts.Colors fields to a style.Colors struct.
@@ -231,20 +231,26 @@ func colorsFromTheme(th theme.Theme) style.Colors {
 	}
 }
 
-// patchConfigTheme updates the theme setting in the INI config file.
-// if a "theme = " line exists, it replaces the value. Otherwise appends it.
-func patchConfigTheme(configPath, themeName string) error {
+// patchConfigTheme updates the theme setting in the INI config file at tc.configPath.
+// every "theme = ..." line sitting outside the default scope ([Application Options]
+// or the unnamed top-of-file section) is removed — these are strays from configs
+// corrupted by the pre-fix persist path, and leaving any of them behind keeps
+// go-flags erroring with "unknown option: theme" even after a successful patch.
+// if a default-scope line exists its value is replaced in place; otherwise a
+// fresh "theme = ..." is inserted just before the first non-[Application Options]
+// section header so the INI parser attributes it to the default scope.
+func (tc *themeCatalog) patchConfigTheme(themeName string) error {
 	if strings.ContainsAny(themeName, "\r\n") {
 		return fmt.Errorf("invalid theme name %q: must not contain newlines", themeName)
 	}
-	if err := os.MkdirAll(filepath.Dir(configPath), 0o750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(tc.configPath), 0o750); err != nil {
 		return fmt.Errorf("creating config dir: %w", err)
 	}
 
-	data, err := os.ReadFile(configPath) //nolint:gosec // path from user's config
+	data, err := os.ReadFile(tc.configPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			if writeErr := fsutil.AtomicWriteFile(configPath, []byte("theme = "+themeName+"\n")); writeErr != nil {
+			if writeErr := fsutil.AtomicWriteFile(tc.configPath, []byte("theme = "+themeName+"\n")); writeErr != nil {
 				return fmt.Errorf("writing config: %w", writeErr)
 			}
 			return nil
@@ -253,35 +259,84 @@ func patchConfigTheme(configPath, themeName string) error {
 	}
 
 	lines := strings.Split(string(data), "\n")
-	found := false
+	defaultIdx, strayIdxs := tc.scanThemeLines(lines)
+	// always remove every "theme = ..." that sits outside the default scope so a
+	// config previously poisoned by the old persist path is fully healed (not
+	// just patched in one spot while go-flags keeps erroring on a remaining stray).
+	// deleting in reverse order keeps earlier indices stable.
+	for i := len(strayIdxs) - 1; i >= 0; i-- {
+		stray := strayIdxs[i]
+		lines = slices.Delete(lines, stray, stray+1)
+		if defaultIdx > stray {
+			defaultIdx--
+		}
+	}
+	if defaultIdx >= 0 {
+		lines[defaultIdx] = "theme = " + themeName
+	} else {
+		lines = slices.Insert(lines, tc.defaultSectionInsertIdx(lines), "theme = "+themeName)
+	}
+
+	if err := fsutil.AtomicWriteFile(tc.configPath, []byte(strings.Join(lines, "\n"))); err != nil {
+		return fmt.Errorf("writing config: %w", err)
+	}
+	return nil
+}
+
+// scanThemeLines walks lines tracking the active INI section and reports every
+// "theme = ..." occurrence, splitting them into the first one found in the
+// default scope ([Application Options] or the unnamed top-of-file section) and
+// a list of stray ones sitting inside other sections. defaultIdx is -1 when no
+// default-scope line exists; strayIdxs is nil when nothing is misplaced.
+// reporting every stray (not just the first) lets callers fully heal configs
+// corrupted by the pre-fix persist path — otherwise a leftover stray still
+// makes go-flags error on startup.
+func (tc *themeCatalog) scanThemeLines(lines []string) (defaultIdx int, strayIdxs []int) {
+	defaultIdx = -1
+	currentSection := ""
 	for i, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		// match "theme = ..." or "theme=..." but not commented-out lines
+		if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+			currentSection = strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+			continue
+		}
 		if strings.HasPrefix(trimmed, "#") || strings.HasPrefix(trimmed, ";") {
 			continue
 		}
 		key, _, ok := strings.Cut(trimmed, "=")
-		if !ok {
+		if !ok || strings.TrimSpace(key) != "theme" {
 			continue
 		}
-		if strings.TrimSpace(key) == "theme" {
-			lines[i] = "theme = " + themeName
-			found = true
-			break
+		inDefault := currentSection == "" || strings.EqualFold(currentSection, "Application Options")
+		if inDefault && defaultIdx < 0 {
+			defaultIdx = i
+			continue
 		}
+		strayIdxs = append(strayIdxs, i)
 	}
+	return defaultIdx, strayIdxs
+}
 
-	if !found {
-		// append before trailing empty lines
-		insertIdx := len(lines)
-		for insertIdx > 0 && strings.TrimSpace(lines[insertIdx-1]) == "" {
-			insertIdx--
+// defaultSectionInsertIdx returns the line index where a new default-scope entry
+// should be placed: immediately before the first [section] header whose name is
+// not [Application Options], backed up over any trailing blank lines. returns
+// len(lines) (EOF) when the file has no such named section.
+func (tc *themeCatalog) defaultSectionInsertIdx(lines []string) int {
+	idx := len(lines)
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, "[") || !strings.HasSuffix(trimmed, "]") {
+			continue
 		}
-		lines = slices.Insert(lines, insertIdx, "theme = "+themeName)
+		name := strings.TrimSpace(trimmed[1 : len(trimmed)-1])
+		if strings.EqualFold(name, "Application Options") {
+			continue
+		}
+		idx = i
+		break
 	}
-
-	if err := fsutil.AtomicWriteFile(configPath, []byte(strings.Join(lines, "\n"))); err != nil {
-		return fmt.Errorf("writing config: %w", err)
+	for idx > 0 && strings.TrimSpace(lines[idx-1]) == "" {
+		idx--
 	}
-	return nil
+	return idx
 }

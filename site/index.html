@@ -3,22 +3,21 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>revdiff — Code Review for AI Agents - Claude Code, Codex, OpenCode, and pi</title>
-    <meta name="description" content="TUI for code review in AI coding sessions. Review diffs, plans, and documents with inline annotations. Ships as a Claude Code plugin, Codex plugin, OpenCode integration, and a pi package.">
-    <meta name="keywords" content="code review for ai agents, code review for claude code, code review for codex, code review for opencode, code review for pi, plan review for claude code, tui diff viewer, terminal code review, inline annotations, claude code plugin, codex plugin, opencode integration, pi package, ai code review tool">
+    <title>revdiff — Diff Review TUI for Claude Code & AI Agents</title>
+    <meta name="description" content="Terminal UI for reviewing diffs, plans, and documents with inline annotations. Ships as a Claude Code, Codex, and OpenCode plugin. Git, Mercurial, Jujutsu.">
     <meta name="author" content="umputun">
     <link rel="canonical" href="https://revdiff.com/">
 
-    <meta property="og:title" content="revdiff — Code Review for AI Agents - Claude Code, Codex, OpenCode, and pi">
-    <meta property="og:description" content="TUI for code review in AI coding sessions. Review diffs, plans, and documents with inline annotations. Ships as a Claude Code plugin, Codex plugin, OpenCode integration, and a pi package.">
+    <meta property="og:title" content="revdiff — Diff Review TUI for Claude Code & AI Agents">
+    <meta property="og:description" content="Terminal UI for reviewing diffs, plans, and documents with inline annotations. Ships as a Claude Code, Codex, and OpenCode plugin. Git, Mercurial, Jujutsu.">
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://revdiff.com">
+    <meta property="og:url" content="https://revdiff.com/">
     <meta property="og:image" content="https://revdiff.com/assets/screenshot.png">
     <meta property="og:site_name" content="revdiff">
 
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="revdiff — Code Review for AI Agents - Claude Code, Codex, OpenCode, and pi">
-    <meta name="twitter:description" content="TUI for code review in AI coding sessions. Review diffs, plans, and documents with inline annotations. Ships as a Claude Code plugin, Codex plugin, OpenCode integration, and a pi package.">
+    <meta name="twitter:title" content="revdiff — Diff Review TUI for Claude Code & AI Agents">
+    <meta name="twitter:description" content="Terminal UI for reviewing diffs, plans, and documents with inline annotations. Ships as a Claude Code, Codex, and OpenCode plugin. Git, Mercurial, Jujutsu.">
     <meta name="twitter:image" content="https://revdiff.com/assets/screenshot.png">
 
     <script type="application/ld+json">
@@ -41,9 +40,66 @@
             "name": "umputun",
             "url": "https://github.com/umputun"
         },
-        "softwareVersion": "0.22.0",
+        "softwareVersion": "0.27.0",
         "downloadUrl": "https://github.com/umputun/revdiff/releases",
         "codeRepository": "https://github.com/umputun/revdiff"
+    }
+    </script>
+
+    <script type="application/ld+json">
+    {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        "mainEntity": [
+            {
+                "@type": "Question",
+                "name": "What is revdiff?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "revdiff is a terminal UI for reviewing diffs, files, and documents with inline annotations. It is designed as the human review layer for AI coding agents like Claude Code, Codex, and OpenCode: you annotate the diff, quit, and the structured annotations are passed back to the agent to apply fixes."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "How do I review diffs in the terminal with Claude Code?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Install the revdiff Claude Code plugin with /plugin marketplace add umputun/revdiff and /plugin install revdiff@umputun-revdiff, then run /revdiff to review uncommitted changes in a terminal overlay. Add inline annotations on lines you want changed, quit, and Claude reads the annotations and applies fixes."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Does revdiff support Mercurial and Jujutsu?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. revdiff auto-detects Git, Mercurial (hg), and Jujutsu (jj) repositories. Diffs and blame work across all three backends. In colocated jj/git repos, jj wins by default. The --all-files mode is supported for git and jj."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Which terminals does revdiff work with?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "As a Claude Code plugin, revdiff opens as an overlay using the host terminal multiplexer or terminal: tmux, zellij, kitty, wezterm, kaku, cmux, ghostty, iTerm2, and Emacs vterm. The launcher detects the environment automatically."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "Is revdiff free and open source?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "Yes. revdiff is free and open source under the MIT License. Source is available on GitHub at github.com/umputun/revdiff. Install via Homebrew, the AUR, deb/rpm packages, or download binaries from GitHub Releases."
+                }
+            },
+            {
+                "@type": "Question",
+                "name": "What output format does revdiff produce?",
+                "acceptedAnswer": {
+                    "@type": "Answer",
+                    "text": "On quit, revdiff writes structured annotations to stdout in plain markdown-style blocks: ## file:line (type) headers followed by your note. The format is designed to be piped into AI agents, scripts, or any tool. Use --output to write to a file instead."
+                }
+            }
+        ]
     }
     </script>
 
@@ -51,9 +107,8 @@
     <link rel="icon" type="image/png" sizes="32x32" href="assets/favicon-32x32.png">
     <link rel="icon" type="image/png" sizes="16x16" href="assets/favicon-16x16.png">
     <link rel="icon" type="image/png" sizes="96x96" href="assets/favicon-96x96.png">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <link rel="preload" href="assets/fonts/ibm-plex-sans-latin.woff2" as="font" type="font/woff2" crossorigin>
+    <link rel="preload" href="assets/fonts/jetbrains-mono-latin.woff2" as="font" type="font/woff2" crossorigin>
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -61,7 +116,7 @@
 <nav class="nav">
     <div class="nav-inner">
         <a href="/" class="nav-logo">
-            <img src="assets/icon.png" alt="revdiff" width="28" height="28">
+            <img src="assets/icon.png" alt="" width="28" height="28">
             <span>revdiff</span>
         </a>
         <div class="nav-links">
@@ -76,9 +131,10 @@
     </div>
 </nav>
 
+<main>
 <header class="hero">
     <div class="hero-content">
-        <div class="hero-badge">v0.22.0 <span class="hero-badge-sep">/</span> open source</div>
+        <div class="hero-badge">v0.27.0 <span class="hero-badge-sep">/</span> open source</div>
         <h1>Review diffs, files, and documents<br>right in your terminal</h1>
         <p class="hero-sub">Code review for AI agents, Claude Code, and pi. Annotate diffs, plans, and documents in a TUI. Structured output on quit, ready for AI agents, scripts, or any tool.</p>
         <div class="hero-actions">
@@ -95,13 +151,41 @@
                 <span></span><span></span><span></span>
             </div>
             <div class="gallery-slides">
-                <img src="assets/screenshot.png" alt="revdiff TUI — diff view with syntax highlighting">
-                <img src="assets/screenshot-2.png" alt="revdiff TUI — help overlay with keybindings" loading="lazy">
-                <img src="assets/screenshot-3.png" alt="revdiff TUI — theme selector" loading="lazy">
-                <img src="assets/screenshot-4.png" alt="revdiff TUI — code view with annotations" loading="lazy">
-                <img src="assets/screenshot-5.png" alt="revdiff TUI — theme picker with live preview" loading="lazy">
-                <img src="assets/screenshot-6.png" alt="revdiff TUI — document browsing with markdown TOC" loading="lazy">
-                <img src="assets/screenshot-7.png" alt="revdiff TUI — code review with annotations" loading="lazy">
+                <picture>
+                    <source srcset="assets/screenshot.avif" type="image/avif">
+                    <source srcset="assets/screenshot.webp" type="image/webp">
+                    <img src="assets/screenshot.png" alt="revdiff TUI — diff view with syntax highlighting" width="1200" height="727" fetchpriority="high">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-2.avif" type="image/avif">
+                    <source srcset="assets/screenshot-2.webp" type="image/webp">
+                    <img src="assets/screenshot-2.png" alt="revdiff TUI — help overlay with keybindings" width="1200" height="727" loading="lazy">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-3.avif" type="image/avif">
+                    <source srcset="assets/screenshot-3.webp" type="image/webp">
+                    <img src="assets/screenshot-3.png" alt="revdiff TUI — theme selector" width="1200" height="727" loading="lazy">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-4.avif" type="image/avif">
+                    <source srcset="assets/screenshot-4.webp" type="image/webp">
+                    <img src="assets/screenshot-4.png" alt="revdiff TUI — code view with annotations" width="1200" height="727" loading="lazy">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-5.avif" type="image/avif">
+                    <source srcset="assets/screenshot-5.webp" type="image/webp">
+                    <img src="assets/screenshot-5.png" alt="revdiff TUI — theme picker with live preview" width="1200" height="727" loading="lazy">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-6.avif" type="image/avif">
+                    <source srcset="assets/screenshot-6.webp" type="image/webp">
+                    <img src="assets/screenshot-6.png" alt="revdiff TUI — document browsing with markdown TOC" width="1200" height="727" loading="lazy">
+                </picture>
+                <picture>
+                    <source srcset="assets/screenshot-7.avif" type="image/avif">
+                    <source srcset="assets/screenshot-7.webp" type="image/webp">
+                    <img src="assets/screenshot-7.png" alt="revdiff TUI — code review with annotations" width="1200" height="727" loading="lazy">
+                </picture>
             </div>
         </div>
     </div>
@@ -115,7 +199,7 @@
             <div class="feature-card">
                 <div class="feature-icon"><span class="glyph add">+</span><span class="glyph remove">-</span></div>
                 <h3>Full-file diff view</h3>
-                <p>Syntax-highlighted diffs with added, removed, and context lines. Collapsed mode shows final text with change markers. Blame gutter shows who wrote each line.</p>
+                <p>Syntax-highlighted diffs with added, removed, and context lines. Press <code>i</code> for an info popup with review scope, file/status counts, aggregate <code>+/-</code> stats, and the commit log for the current ref range. Blame gutter shows who wrote each line.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon"><span class="glyph annotation">#</span></div>
@@ -165,7 +249,7 @@
             <div class="feature-card">
                 <div class="feature-icon"><span class="glyph accent">~</span></div>
                 <h3>Themes &amp; keybindings</h3>
-                <p>8 bundled color themes with interactive selector (<code>T</code>) and live preview. 23 customizable color keys. Full keybinding remapping. Community theme gallery.</p>
+                <p>8 bundled color themes with interactive selector (<code>T</code>) and live preview. 23 customizable color keys. Full keybinding remapping. Optional vim-motion preset. Community theme gallery.</p>
             </div>
             <div class="feature-card">
                 <div class="feature-icon"><span class="glyph accent">&#x2387;</span></div>
@@ -412,11 +496,12 @@ refactor this hunk to reduce nesting
 don't remove this validation</code></div>
     </div>
 </section>
+</main>
 
 <footer class="footer">
     <div class="section-inner footer-inner">
         <div class="footer-left">
-            <img src="assets/icon.png" alt="revdiff" width="24" height="24">
+            <img src="assets/icon.png" alt="" width="24" height="24">
             <span>revdiff by <a href="https://umputun.dev">umputun</a></span>
         </div>
         <div class="footer-links">

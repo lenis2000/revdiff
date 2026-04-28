@@ -10,6 +10,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -28,6 +29,9 @@ const (
 	ActionEnd              Action = "end"
 	ActionScrollLeft       Action = "scroll_left"
 	ActionScrollRight      Action = "scroll_right"
+	ActionScrollCenter     Action = "scroll_center"
+	ActionScrollTop        Action = "scroll_top"
+	ActionScrollBottom     Action = "scroll_bottom"
 	ActionNextItem         Action = "next_item"
 	ActionPrevItem         Action = "prev_item"
 	ActionNextHunk         Action = "next_hunk"
@@ -56,7 +60,7 @@ const (
 	ActionHelp             Action = "help"
 	ActionDismiss          Action = "dismiss"
 	ActionThemeSelect      Action = "theme_select"
-	ActionCommitInfo       Action = "commit_info"
+	ActionInfo             Action = "info"
 	ActionReload           Action = "reload"
 )
 
@@ -68,6 +72,7 @@ var validActions = map[Action]bool{
 	ActionDown: true, ActionUp: true, ActionPageDown: true, ActionPageUp: true,
 	ActionHalfPageDown: true, ActionHalfPageUp: true, ActionHome: true, ActionEnd: true,
 	ActionScrollLeft: true, ActionScrollRight: true,
+	ActionScrollCenter: true, ActionScrollTop: true, ActionScrollBottom: true,
 	ActionNextItem: true, ActionPrevItem: true, ActionNextHunk: true, ActionPrevHunk: true,
 	ActionTogglePane: true, ActionFocusTree: true, ActionFocusDiff: true,
 	ActionSearch:  true,
@@ -76,13 +81,62 @@ var validActions = map[Action]bool{
 	ActionToggleLineNums: true, ActionToggleBlame: true, ActionToggleWordDiff: true, ActionToggleHunk: true,
 	ActionMarkReviewed: true, ActionFilter: true, ActionToggleUntracked: true,
 	ActionQuit: true, ActionDiscardQuit: true, ActionHelp: true, ActionDismiss: true, ActionThemeSelect: true,
-	ActionCommitInfo: true,
-	ActionReload:     true,
+	ActionInfo:   true,
+	ActionReload: true,
 }
 
-// IsValidAction returns true if the action name is recognized.
+// deprecatedActionAliases maps obsolete action names parsed from user
+// keybinding files onto their canonical replacement. The action was renamed
+// from "commit_info" to "info" when the popup expanded to cover description
+// and aggregate stats; honoring the old name lets pre-existing
+// ~/.config/revdiff/keybindings files keep working without manual edits.
+// The parser surfaces a single [WARN] per deprecated alias for the lifetime
+// of the process (see warnOnceDeprecatedAlias) so that a file with several
+// "map ... commit_info" lines does not spam the log.
+var deprecatedActionAliases = map[Action]Action{
+	"commit_info": ActionInfo,
+}
+
+// IsValidAction returns true if the action name is recognized. Deprecated
+// aliases also report true so the parser accepts them; resolveAction performs
+// the rewrite to the canonical name before storage.
 func IsValidAction(a Action) bool {
-	return validActions[a]
+	if validActions[a] {
+		return true
+	}
+	_, ok := deprecatedActionAliases[a]
+	return ok
+}
+
+// resolveAction returns the canonical Action for a, rewriting any deprecated
+// alias to its replacement. ok is false when a is neither a valid action nor a
+// known alias. Returns the canonical action plus a deprecated flag so callers
+// can surface a one-time warning to the user.
+func resolveAction(a Action) (canonical Action, deprecated, ok bool) {
+	if validActions[a] {
+		return a, false, true
+	}
+	if alias, found := deprecatedActionAliases[a]; found {
+		return alias, true, true
+	}
+	return "", false, false
+}
+
+// loggedDeprecatedAliases tracks which deprecated aliases have already
+// surfaced a [WARN] line during the program's lifetime. Process-wide so a
+// keybindings file with several occurrences of "map i commit_info" produces
+// exactly one warning instead of one per line; mirrors the behavior promised
+// by the PR introducing the alias.
+var loggedDeprecatedAliases sync.Map
+
+// warnOnceDeprecatedAlias logs a deprecation warning the first time alias is
+// observed in the running process. Subsequent calls with the same alias are
+// no-ops. Called from parse() when resolveAction reports deprecated=true.
+func warnOnceDeprecatedAlias(alias, canonical Action) {
+	if _, loaded := loggedDeprecatedAliases.LoadOrStore(string(alias), struct{}{}); loaded {
+		return
+	}
+	log.Printf("[WARN] keybindings: action %q is deprecated, use %q", alias, canonical)
 }
 
 // HelpEntry describes a single action for the help overlay.
@@ -108,8 +162,9 @@ type HelpEntryWithKeys struct {
 // Keymap maps key names to actions. Keys are stored as the string returned
 // by bubbletea's tea.KeyMsg.String().
 type Keymap struct {
-	bindings     map[string]Action
-	descriptions []HelpEntry // ordered list of action descriptions
+	bindings         map[string]Action
+	descriptions     []HelpEntry         // ordered list of action descriptions
+	chordPrefixCache map[string]struct{} // lazy cache of chord leader keys; nil = not yet built
 }
 
 // defaultDescriptions returns the ordered help entries grouped by section.
@@ -126,6 +181,9 @@ func defaultDescriptions() []HelpEntry {
 		{ActionEnd, "go to bottom", "Navigation"},
 		{ActionScrollLeft, "scroll left", "Navigation"},
 		{ActionScrollRight, "scroll right / focus diff", "Navigation"},
+		{ActionScrollCenter, "center viewport on cursor", "Navigation"},
+		{ActionScrollTop, "align viewport top", "Navigation"},
+		{ActionScrollBottom, "align viewport bottom", "Navigation"},
 
 		// file/hunk
 		{ActionNextItem, "next file / search match", "File/Hunk"},
@@ -160,7 +218,7 @@ func defaultDescriptions() []HelpEntry {
 		{ActionMarkReviewed, "mark file as reviewed", "View"},
 		{ActionFilter, "filter files", "View"},
 		{ActionThemeSelect, "theme selector", "View"},
-		{ActionCommitInfo, "show commit info for the current range", "View"},
+		{ActionInfo, "show review info popup", "View"},
 		{ActionReload, "reload diff from VCS", "View"},
 
 		// quit
@@ -218,7 +276,7 @@ func defaultBindings() map[string]Action {
 		"Q":      ActionDiscardQuit,
 		"?":      ActionHelp,
 		"T":      ActionThemeSelect,
-		"i":      ActionCommitInfo,
+		"i":      ActionInfo,
 		"R":      ActionReload,
 		"esc":    ActionDismiss,
 	}
@@ -232,6 +290,20 @@ func Default() *Keymap {
 	}
 }
 
+// NormalizeKey returns the Latin QWERTY equivalent of a single non-Latin key
+// character, or the input unchanged when it has no mapping. Multi-character key
+// strings (e.g. "esc", "ctrl+w") pass through unchanged. Used by dispatch paths
+// that compare keys against literal bindings without going through Resolve, so
+// non-Latin layouts behave identically to Latin ones.
+func NormalizeKey(key string) string {
+	if r, size := utf8.DecodeRuneInString(key); size == len(key) {
+		if alias, ok := layoutResolve(r); ok {
+			return string(alias)
+		}
+	}
+	return key
+}
+
 // Resolve returns the action bound to the given key, or empty Action if unbound.
 // For non-Latin keyboard layouts, if the key has no direct binding, it is
 // translated to its Latin QWERTY equivalent and looked up again.
@@ -243,6 +315,24 @@ func (km *Keymap) Resolve(key string) Action {
 	if r, size := utf8.DecodeRuneInString(key); size == len(key) {
 		if alias, ok := layoutResolve(r); ok {
 			if a, ok := km.bindings[string(alias)]; ok {
+				return a
+			}
+		}
+	}
+	return ""
+}
+
+// ResolveChord returns the action bound to the chord (prefix, second), or empty
+// Action if unbound. Applies a layout-resolve fallback to the second key: when
+// the direct lookup misses and the second key is a single rune, the rune is
+// translated to its Latin QWERTY equivalent and the lookup is retried.
+func (km *Keymap) ResolveChord(prefix, second string) Action {
+	if a, ok := km.bindings[prefix+">"+second]; ok {
+		return a
+	}
+	if r, size := utf8.DecodeRuneInString(second); size == len(second) {
+		if alias, ok := layoutResolve(r); ok {
+			if a, ok := km.bindings[prefix+">"+string(alias)]; ok {
 				return a
 			}
 		}
@@ -265,11 +355,38 @@ func (km *Keymap) KeysFor(action Action) []string {
 // Bind maps a key to an action, overriding any previous binding for that key.
 func (km *Keymap) Bind(key string, action Action) {
 	km.bindings[key] = action
+	km.chordPrefixCache = nil
 }
 
 // Unbind removes the binding for the given key. No-op if key is not bound.
 func (km *Keymap) Unbind(key string) {
 	delete(km.bindings, key)
+	km.chordPrefixCache = nil
+}
+
+// chordPrefixes returns the set of leader keys that have at least one chord binding.
+// The result is built lazily on first call and cached until a Bind/Unbind invalidates it.
+func (km *Keymap) chordPrefixes() map[string]struct{} {
+	if km.chordPrefixCache != nil {
+		return km.chordPrefixCache
+	}
+	cache := make(map[string]struct{})
+	for k := range km.bindings {
+		idx := strings.Index(k, ">")
+		if idx <= 0 {
+			continue
+		}
+		cache[k[:idx]] = struct{}{}
+	}
+	km.chordPrefixCache = cache
+	return cache
+}
+
+// IsChordLeader returns true if the given key is the leader of any chord binding.
+// Lookup is O(1) via a cached prefix index, built on first call.
+func (km *Keymap) IsChordLeader(key string) bool {
+	_, ok := km.chordPrefixes()[key]
+	return ok
 }
 
 // HelpSections returns grouped help entries with effective key bindings.
@@ -319,7 +436,7 @@ func (km *Keymap) Dump(w io.Writer) error {
 		for _, entry := range sec.Entries {
 			keys := km.KeysFor(entry.Action)
 			for _, k := range keys {
-				if _, err := fmt.Fprintf(w, "map %s %s\n", dumpKeyName(k), entry.Action); err != nil {
+				if _, err := fmt.Fprintf(w, "map %s %s\n", km.dumpKeyName(k), entry.Action); err != nil {
 					return fmt.Errorf("dump keybindings: %w", err)
 				}
 			}
@@ -336,7 +453,12 @@ var reverseAliases = map[string]string{
 
 // dumpKeyName converts a canonical key string to a user-friendly name for dump output.
 // keys that are whitespace-only need special handling so the output can be reloaded.
-func dumpKeyName(key string) string {
+// chord keys are split on ">" and each half is dumped independently so that an embedded
+// literal space in either half is rewritten to its "space" alias, preserving the round-trip.
+func (km *Keymap) dumpKeyName(key string) string {
+	if leader, second, ok := strings.Cut(key, ">"); ok {
+		return km.dumpKeyName(leader) + ">" + km.dumpKeyName(second)
+	}
 	if alias, ok := reverseAliases[key]; ok {
 		return alias
 	}
@@ -373,8 +495,43 @@ func normalizeKey(key string) string {
 	if strings.HasPrefix(lower, "ctrl+") {
 		return lower
 	}
+	// alt+ prefixed keys: lowercase only the "alt+" prefix; preserve post-prefix
+	// case because bubbletea distinguishes alt+t from alt+T (shift-modifier matters)
+	if strings.HasPrefix(lower, "alt+") {
+		return "alt+" + key[4:]
+	}
 	// preserve original case for single chars (j vs J matters)
 	return key
+}
+
+// parseChordKey validates and normalizes a chord key of the form "<leader>><second>".
+// Returns the normalized chord key and true on success, or "" and false after logging
+// a warning for empty halves, three-stage chords, non-ctrl/alt leaders, or esc as the
+// second-stage key (reserved for cancel). Leader case is normalized via normalizeKey
+// (ctrl+/alt+ lowercased); second-stage case is preserved so that ctrl+w>x and ctrl+w>X
+// remain distinct.
+func parseChordKey(rawKey string, lineNum int) (string, bool) {
+	parts := strings.SplitN(rawKey, ">", 2)
+	leader, second := parts[0], parts[1]
+	if leader == "" || second == "" {
+		log.Printf("[WARN] keybindings:%d: chord halves cannot be empty, skipping", lineNum)
+		return "", false
+	}
+	if strings.Contains(second, ">") {
+		log.Printf("[WARN] keybindings:%d: only 2-stage chords supported, skipping", lineNum)
+		return "", false
+	}
+	leaderNorm := normalizeKey(leader)
+	if !strings.HasPrefix(leaderNorm, "ctrl+") && !strings.HasPrefix(leaderNorm, "alt+") {
+		log.Printf("[WARN] keybindings:%d: chord leader must be ctrl+ or alt+ combo, skipping", lineNum)
+		return "", false
+	}
+	secondNorm := normalizeKey(second)
+	if secondNorm == "esc" {
+		log.Printf("[WARN] keybindings:%d: esc cannot be a chord second-stage key (reserved for cancel), skipping", lineNum)
+		return "", false
+	}
+	return leaderNorm + ">" + secondNorm, true
 }
 
 // parse reads keybinding definitions from r and returns map entries and unmap keys.
@@ -403,16 +560,36 @@ func parse(r io.Reader) (maps []mapEntry, unmaps []string, err error) {
 				log.Printf("[WARN] keybindings:%d: map requires key and action, skipping", lineNum)
 				continue
 			}
-			key := normalizeKey(fields[1])
-			action := Action(fields[2])
-			if !IsValidAction(action) {
-				log.Printf("[WARN] keybindings:%d: unknown action %q, skipping", lineNum, action)
+			rawKey := fields[1]
+			rawAction := Action(fields[2])
+			action, deprecated, ok := resolveAction(rawAction)
+			if !ok {
+				log.Printf("[WARN] keybindings:%d: unknown action %q, skipping", lineNum, rawAction)
 				continue
 			}
-			maps = append(maps, mapEntry{key: key, action: action})
+			if deprecated {
+				warnOnceDeprecatedAlias(rawAction, action)
+			}
+			if strings.Contains(rawKey, ">") && rawKey != ">" {
+				key, ok := parseChordKey(rawKey, lineNum)
+				if !ok {
+					continue
+				}
+				maps = append(maps, mapEntry{key: key, action: action})
+				continue
+			}
+			maps = append(maps, mapEntry{key: normalizeKey(rawKey), action: action})
 		case "unmap":
-			key := normalizeKey(fields[1])
-			unmaps = append(unmaps, key)
+			rawKey := fields[1]
+			if strings.Contains(rawKey, ">") && rawKey != ">" {
+				key, ok := parseChordKey(rawKey, lineNum)
+				if !ok {
+					continue
+				}
+				unmaps = append(unmaps, key)
+				continue
+			}
+			unmaps = append(unmaps, normalizeKey(rawKey))
 		default:
 			log.Printf("[WARN] keybindings:%d: unknown command %q in line %q, skipping", lineNum, cmd, line)
 		}
@@ -447,7 +624,27 @@ func Load(path string) (*Keymap, error) {
 		km.Bind(m.key, m.action)
 	}
 
+	km.resolveConflicts()
 	return km, nil
+}
+
+// resolveConflicts drops any standalone binding whose key is also a chord leader.
+// When both "ctrl+w" and "ctrl+w>x" exist, the standalone is removed with a warning
+// so that pressing the leader always enters chord-pending state instead of firing
+// the standalone action. Invalidates the chord-prefix cache once at the end.
+func (km *Keymap) resolveConflicts() {
+	for chordKey := range km.bindings {
+		idx := strings.Index(chordKey, ">")
+		if idx <= 0 {
+			continue
+		}
+		leader := chordKey[:idx]
+		if _, exists := km.bindings[leader]; exists {
+			log.Printf("[WARN] keybindings: %s bound as both standalone and chord prefix; standalone dropped", leader)
+			delete(km.bindings, leader)
+		}
+	}
+	km.chordPrefixCache = nil
 }
 
 // LoadOrDefault loads keybindings from path if the file exists, otherwise returns

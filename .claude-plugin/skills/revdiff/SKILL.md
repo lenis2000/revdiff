@@ -1,6 +1,6 @@
 ---
 name: revdiff
-description: Review diffs, files, and documents with inline annotations in a TUI overlay, or answer questions about revdiff usage, configuration, themes, and keybindings. Opens revdiff in tmux/zellij/kitty/wezterm/cmux/ghostty/iterm2/emacs-vterm, captures annotations, and addresses them. Works in git, hg, and jj repos (auto-detected). Activates on "revdiff", "review diff", "review changes", "annotate diff", "git review with revdiff", "hg review with revdiff", "review jj change", "interactive diff review", "revdiff all files", "review all files", "browse all files", "revdiff config", "revdiff themes", "revdiff keybindings", "how to configure revdiff", "what themes does revdiff have".
+description: Review diffs, files, and documents with inline annotations in a TUI overlay, or answer questions about revdiff usage, configuration, themes, and keybindings. Opens revdiff in tmux/zellij/kitty/wezterm/cmux/ghostty/iterm2/emacs-vterm, captures annotations, and addresses them. Works in git, hg, and jj repos (auto-detected). Activates on "revdiff", "review diff", "review changes", "annotate diff", "git review with revdiff", "hg review with revdiff", "review jj change", "interactive diff review", "revdiff all files", "review all files", "browse all files", "revdiff <file>", "revdiff README.md", "revdiff /tmp/notes.txt", "review this file", "annotate this file", "review file with revdiff", "open this review in revdiff", "show review in revdiff", "review in revdiff", "revdiff config", "revdiff themes", "revdiff keybindings", "how to configure revdiff", "what themes does revdiff have".
 argument-hint: 'optional: ref(s), "all files", or file path'
 allowed-tools: [Bash, Read, Edit, Write, Grep, Glob]
 ---
@@ -16,6 +16,9 @@ Review diffs with inline annotations using revdiff TUI in a terminal overlay. Wo
 - "hg review with revdiff", "review jj change"
 - "revdiff all files", "review all files", "browse all files"
 - "revdiff all files exclude vendor"
+- "revdiff README.md", "revdiff docs/plan.md", "revdiff /tmp/notes.txt" — single-file review (`--only` mode)
+- "review this file", "annotate this file", "review file with revdiff"
+- "open this review in revdiff", "show review in revdiff", "review in revdiff" — open an in-session review (preload mode)
 
 ## Answering Questions
 
@@ -34,6 +37,10 @@ ${CLAUDE_SKILL_DIR}/scripts/read-latest-history.sh
 ```
 
 The script resolves the history dir from `$REVDIFF_HISTORY_DIR` (default `~/.config/revdiff/history`), finds the repo subdir via VCS root basename (jj/git/hg), and prints the newest `.md` file found. Each history file contains a header (path, refs, and — when available — a git commit hash), the annotations in `## file:line (type)` format, and the raw git diff for annotated files. The `commit:` line and diff block are captured from git only; in hg/jj repos the diff block will be empty and no commit hash is recorded. See `references/usage.md` "Review History" section for directory layout, stdin/only handling, and override options.
+
+## Opening an In-Session Review
+
+When the user asks to open an in-session review in revdiff (the conversation already contains review comments produced earlier in the session), write those comments to a temp file (e.g. `/tmp/revdiff-review-XXXXXX.md`) using the format documented in `references/usage.md` ("Output Format" section), then run the normal launcher flow (Step 1 ref detection, Step 2 invocation) with `--annotations=<temp-path>` appended. Step 3 onward handles the curated annotations as usual.
 
 ## How It Works
 
@@ -64,10 +71,13 @@ If not found, guide installation:
 - Skip ref detection entirely, go directly to Step 2
 - Example: "all files exclude vendor" → `--all-files --exclude=vendor`
 
-**File review mode**: If `$ARGUMENTS` is a file path (e.g., `docs/plans/feature.md`, `/tmp/notes.txt`):
+**File review mode**: If `$ARGUMENTS` is a single token that points at a file on disk (e.g., `docs/plans/feature.md`, `/tmp/notes.txt`, `README.md`, `main.go`, `file.blah`), treat it as file review:
+- Decide with `test -f "$ARGUMENTS"` — if the file exists, it's file review mode
+- Also treat as file review if the token starts with `/` or `./`, or contains `/` and has a file extension (e.g., `src/app.go`), even when the file is not yet reachable from the current directory
 - Skip ref detection entirely
 - Go directly to Step 2 with `--only=<filepath>` (no ref argument)
 - Works both inside and outside a VCS repo — revdiff reads the file from disk as context-only
+- Ambiguous token (e.g., `main` — both a branch name and a potential filename without extension) → prefer ref mode; ask the user only if neither `test -f` nor `git rev-parse --verify` resolves
 
 **Ref mode**: If `$ARGUMENTS` contains explicit ref(s) (e.g., `HEAD~1`, `main`, or `main feature` for two-ref diff), use as-is.
 
@@ -97,10 +107,12 @@ The script outputs structured fields:
 
 ### Step 2: Launch Review
 
+When you are launching revdiff for the user (e.g., right after a refactor or analysis), pass `--description="..."` so the info popup (`i` key) explains what the change is and what to look at — markdown is supported. For longer prose, write the markdown to a temp file and pass `--description-file=/tmp/revdiff-desc-XXXXXX.md`. The two flags are mutually exclusive; both are optional. Skip when there's no useful context to add.
+
 Run the launcher through the override-chain resolver:
 
 ```bash
-"$("${CLAUDE_SKILL_DIR}/scripts/resolve-launcher.sh" launch-revdiff.sh "${CLAUDE_PLUGIN_DATA}")" [base] [against] [--staged] [--only=file1] [--all-files] [--exclude=prefix]
+"$("${CLAUDE_SKILL_DIR}/scripts/resolve-launcher.sh" launch-revdiff.sh "${CLAUDE_PLUGIN_DATA}")" [base] [against] [--staged] [--only=file1] [--all-files] [--exclude=prefix] [--description=text|--description-file=path]
 ```
 
 The resolver and launcher MUST run in the same bash invocation — the resolver runs as a sub-shell substitution so the resolved path is consumed immediately as the executable. The resolver checks `user → bundled` (see `references/install.md` for override paths) and prints the first-found absolute path. Fall-through to the bundled launcher is the default when no overrides exist.
@@ -236,4 +248,13 @@ User: "revdiff all files exclude vendor"
 → launch revdiff with --all-files --exclude=vendor
 → user browses all tracked files, annotates as needed
 → same annotation loop as above
+```
+
+```
+User: "revdiff docs/plans/feature.md"
+→ test -f docs/plans/feature.md succeeds → file review mode
+→ launch revdiff with --only=docs/plans/feature.md (context-only view, no ref)
+→ user annotates prose: "section 'Open questions':3 - drop this, resolved"
+→ user quits
+→ same annotation loop as above (applies to the file content)
 ```

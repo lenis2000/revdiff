@@ -91,7 +91,7 @@ if [ -n "${ZELLIJ:-}" ] && command -v zellij >/dev/null 2>&1; then
     trap 'rm -f "$OUTPUT_FILE" "$SENTINEL" "$LAUNCH_SCRIPT"' EXIT
     cat > "$LAUNCH_SCRIPT" <<LAUNCHER
 #!/bin/sh
-$REVDIFF_CMD; touch '$SENTINEL'
+$REVDIFF_CMD; touch $(sq "$SENTINEL")
 LAUNCHER
     chmod +x "$LAUNCH_SCRIPT"
 
@@ -174,23 +174,25 @@ LAUNCHER
 
     # capture new surface ref from "OK surface:N ..." output
     CMUX_NEW=$(cmux new-split down 2>&1) || true
-    CMUX_SURF=$(echo "$CMUX_NEW" | grep -o 'surface:[0-9]*' | head -1)
+    CMUX_SURF=$(echo "$CMUX_NEW" | grep -o 'surface:[0-9]*' | head -1 || true)
+
+    # bail explicitly when we can't identify the new surface — otherwise
+    # `cmux send` without --surface would target the caller's pane and
+    # replace the user's interactive shell via `exec ...`
+    if [ -z "$CMUX_SURF" ]; then
+        echo "error: cmux new-split did not return a surface id: $CMUX_NEW" >&2
+        exit 1
+    fi
 
     # send exec command immediately — the pty input buffer holds the text
     # until the new pane's shell finishes initializing and reads it
-    if [ -n "$CMUX_SURF" ]; then
-        cmux send --surface "$CMUX_SURF" "exec $(sq "$LAUNCH_SCRIPT")\n" >/dev/null 2>&1
-    else
-        cmux send "exec $(sq "$LAUNCH_SCRIPT")\n" >/dev/null 2>&1
-    fi
+    cmux send --surface "$CMUX_SURF" "exec $(sq "$LAUNCH_SCRIPT")\n" >/dev/null 2>&1
 
     while [ ! -f "$SENTINEL" ]; do
         sleep 0.3
     done
     # close the split pane
-    if [ -n "$CMUX_SURF" ]; then
-        cmux close-surface --surface "$CMUX_SURF" 2>/dev/null || true
-    fi
+    cmux close-surface --surface "$CMUX_SURF" 2>/dev/null || true
     rm -f "$SENTINEL" "$LAUNCH_SCRIPT"
     cat "$OUTPUT_FILE"
     exit 0

@@ -2,6 +2,7 @@ package annotation
 
 import (
 	"fmt"
+	"io"
 	"sort"
 	"strings"
 )
@@ -112,6 +113,22 @@ func (s *Store) Files() []string {
 	return files
 }
 
+// Load parses markdown produced by FormatOutput from r and adds each recovered
+// annotation via Add (so duplicate file/line/type pairs apply last-write-wins).
+// It is the symmetric inverse of FormatOutput on the API surface; callers that
+// need to filter records (e.g. drop orphans against a diff) should use Parse
+// directly and Add the survivors themselves.
+func (s *Store) Load(r io.Reader) error {
+	records, err := Parse(r)
+	if err != nil {
+		return err
+	}
+	for _, a := range records {
+		s.Add(a)
+	}
+	return nil
+}
+
 // FormatOutput produces the structured output format for stdout.
 // Files are sorted alphabetically, annotations within each file by line number.
 // Returns empty string if no annotations exist.
@@ -152,18 +169,19 @@ func (s *Store) FormatOutput() string {
 	return buf.String()
 }
 
-// escapeHeaderLines prefixes any body line that starts with "## " (the
-// record-header form) with a single space so parsers splitting on "## " record
-// headers cannot confuse a body line for a new record header. Other heading
-// forms like "### subheader" are not escaped since they cannot collide with
-// the record-header split marker.
+// escapeHeaderLines prefixes any body line whose first non-space content is
+// "## " with a single extra space. The parser inverts this by stripping one
+// leading space from any body line that, after left-trimming, begins with
+// "## ". Escaping pre-indented variants (e.g. " ## ") keeps the round-trip
+// symmetric for arbitrary user content. Other heading forms like "### " are
+// not escaped since they cannot collide with the record-header split marker.
 func (s *Store) escapeHeaderLines(body string) string {
 	if !strings.Contains(body, "## ") {
 		return body
 	}
 	lines := strings.Split(body, "\n")
 	for i, line := range lines {
-		if strings.HasPrefix(line, "## ") {
+		if strings.HasPrefix(strings.TrimLeft(line, " "), "## ") {
 			lines[i] = " " + line
 		}
 	}

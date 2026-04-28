@@ -172,6 +172,22 @@ func (ft *FileTree) SelectByPath(path string) bool {
 	return false
 }
 
+// SelectByVisibleRow sets the cursor to the entry at the given visible row.
+// row is 0-based relative to the first visible tree line (ft.offset).
+// returns true if the row maps to a valid entry, false otherwise.
+// does not modify the cursor when returning false.
+func (ft *FileTree) SelectByVisibleRow(row int) bool {
+	if row < 0 {
+		return false
+	}
+	idx := ft.offset + row
+	if idx >= len(ft.entries) {
+		return false
+	}
+	ft.cursor = idx
+	return true
+}
+
 // EnsureVisible adjusts offset so the cursor is within the visible range of given height.
 func (ft *FileTree) EnsureVisible(height int) {
 	ensureVisible(&ft.cursor, &ft.offset, len(ft.entries), height)
@@ -291,6 +307,12 @@ func (ft *FileTree) ToggleReviewed(path string) {
 	} else {
 		ft.reviewed[path] = true
 	}
+}
+
+// ScrollState returns the file tree's current visible window state.
+// call after Render or EnsureVisible so Offset reflects the latest cursor position.
+func (ft *FileTree) ScrollState() ScrollState {
+	return ScrollState{Total: len(ft.entries), Offset: ft.offset}
 }
 
 // Render produces the file tree display string, showing only entries visible within the given height.

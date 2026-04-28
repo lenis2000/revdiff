@@ -2,47 +2,89 @@
 
 > TUI for reviewing diffs, files, and documents with inline annotations
 
-revdiff is a terminal-based UI tool for code review and document annotation. It displays git diffs with syntax highlighting, lets users annotate specific lines, and outputs structured annotations to stdout on quit. This makes it easy to pipe results into AI agents (like Claude Code), scripts, or other tools.
+revdiff is a terminal-based UI for code review and document annotation. It displays diffs from Git, Mercurial, and Jujutsu repositories with syntax highlighting, lets users annotate specific lines, and outputs structured annotations to stdout on quit. This makes it the human review layer for AI coding agents (Claude Code, Codex, OpenCode, pi) and for piping into scripts or other tools.
 
 ## Key Use Cases
 
-- Code review for AI agents: revdiff acts as the human review layer in AI coding sessions
+- Code review for AI agents: revdiff is the human review layer in AI coding sessions
 - Code review for Claude Code: ships as a Claude Code plugin with terminal overlay support
-- Plan review for Claude Code: separate plugin for annotating implementation plans before approval
-- General file annotation: browse and annotate any file, not just git diffs
+- Code review for Codex: ships as a Codex CLI skill with the same workflow
+- Code review for OpenCode: integration via /revdiff command and tool call
+- Plan review: separate plugins for annotating implementation plans before approval
+- General file annotation: browse and annotate any file, not just version-controlled diffs
+- Markdown document review: TOC navigation for single-file markdown reviews
 
 ## Features
 
 - Full-file diff view with syntax highlighting (chroma)
 - Inline annotations on any line (added, removed, or context)
-- File-level annotations
+- File-level annotations and cross-file annotation list popup
 - Structured output format: `## file:line (type)` blocks
 - Collapsed diff mode showing final text with change markers
-- Word wrap, line numbers, search with n/N navigation
-- All-files mode for browsing entire codebases
-- Context-only file review (no git required)
-- Markdown TOC navigation for document review
-- 7 bundled color themes, 23 customizable color keys
-- Full keybinding remapping
-- Config file, env vars, or CLI flags
+- Compact context mode for shrinking large diffs at the source
+- Word wrap, line numbers, blame gutter
+- Vim-style search with n/N navigation
+- Hunk navigation with [/]
+- All-files mode for browsing entire codebases (git, jj)
+- Include/exclude prefix filters
+- Context-only file review with --only (no VCS required)
+- Stdin mode for piping arbitrary diff or text
+- Markdown TOC sidebar for document review
+- 8 bundled color themes plus a community theme gallery
+- 23 customizable color keys, full keybinding remapping
+- Optional vim-motion preset for keybindings
+- Configurable chord (kitty-style) keybindings
+- Reload (R) to refresh the diff in place
+- Commit info overlay (i) for VCS metadata
+- Auto-saved review history under ~/.config/revdiff/history/
+
+## Version Control Support
+
+revdiff auto-detects the VCS by walking up from the working directory. Precedence: jj > git > hg. In colocated jj/git repositories, jj wins.
+
+- Git: full support including --all-files
+- Mercurial (hg): diff and blame
+- Jujutsu (jj): diff, blame, --all-files
 
 ## Claude Code Plugin
 
 Install: `/plugin marketplace add umputun/revdiff && /plugin install revdiff@umputun-revdiff`
 
-Supports tmux, kitty, wezterm, cmux, ghostty, and iTerm2 terminal overlays.
+Supports tmux, zellij, kitty, wezterm, kaku, cmux, ghostty, iTerm2, and Emacs vterm overlays. The launcher auto-detects the terminal environment.
 
-Usage: `/revdiff HEAD~1` or natural language like "review diff against main"
+Usage: `/revdiff` (smart detection), `/revdiff HEAD~1`, `/revdiff master`, or natural language like "review diff against main".
 
 The plugin supports a full review loop: annotate -> Claude plans fixes -> Claude applies fixes -> re-review.
+
+## Codex Plugin
+
+Skills installed under ~/.codex/skills/revdiff and ~/.codex/skills/revdiff-plan. Same /revdiff workflow as Claude Code, plus /revdiff-plan which extracts the last Codex assistant message for annotation.
+
+## OpenCode Integration
+
+Setup script under plugins/opencode/. Provides /revdiff command, tool call, and a plan-review plugin that auto-launches revdiff when the assistant exits plan mode.
+
+## Configuration
+
+- Config file: `~/.config/revdiff/config` (INI format)
+- Keybindings: `~/.config/revdiff/keybindings`
+- Themes: `~/.config/revdiff/themes/` (auto-populated with 8 bundled themes)
+- Precedence: CLI flags > env vars > config file > defaults
+- `--theme NAME` applies a theme; `--dump-theme`, `--list-themes`, `--init-themes` for theme management
+- `--keys` overrides keybindings path; `--dump-keys` prints effective bindings
 
 ## Installation
 
 - Homebrew: `brew install umputun/apps/revdiff`
+- Arch (AUR): `paru -S revdiff`
+- Debian/Ubuntu: `sudo dpkg -i revdiff_*.deb`
+- RPM: `sudo rpm -i revdiff_*.rpm`
+- Pi: `pi install https://github.com/umputun/revdiff`
 - Binaries: https://github.com/umputun/revdiff/releases
 
 ## Links
 
 - Website: https://revdiff.com
 - Source: https://github.com/umputun/revdiff
-- Documentation: https://revdiff.com/docs.html
+- Documentation: https://revdiff.com/docs
+- License: MIT

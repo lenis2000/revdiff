@@ -355,7 +355,7 @@ func TestModel_HandleFileAnnotateKey(t *testing.T) {
 	})
 }
 
-func TestModel_HandleCommitInfo_OpensOverlayWhenApplicable(t *testing.T) {
+func TestModel_HandleInfo_OpensOverlayWhenApplicable(t *testing.T) {
 	commits := []diff.CommitInfo{{Hash: "abc123"}, {Hash: "def456"}}
 	m := testModel([]string{"a.go"}, nil)
 	m.commits.source = &fakeCommitLog{}
@@ -363,15 +363,17 @@ func TestModel_HandleCommitInfo_OpensOverlayWhenApplicable(t *testing.T) {
 	m.commits.loaded = true
 	m.commits.list = commits
 
-	result, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
+	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	model := result.(Model)
-	assert.Nil(t, cmd, "commit-info open does not issue a tea.Cmd")
 	assert.True(t, model.overlay.Active(), "i should open the overlay when applicable")
-	assert.Equal(t, overlay.KindCommitInfo, model.overlay.Kind())
-	assert.Empty(t, model.commits.hint, "applicable path does not set a hint")
+	assert.Equal(t, overlay.KindInfo, model.overlay.Kind())
 }
 
-func TestModel_HandleCommitInfo_HintWhenNotApplicable(t *testing.T) {
+func TestModel_HandleInfo_OpensOverlayEvenWhenCommitsHidden(t *testing.T) {
+	// regression for the unified info popup: the overlay must open in modes
+	// where the commits section is hidden (stdin / staged / no-VCS), so the
+	// session info section is reachable. The pre-merge behavior was a
+	// "no commits in this mode" hint with no overlay — now removed.
 	fake := &fakeCommitLog{fn: func(string) ([]diff.CommitInfo, error) {
 		return []diff.CommitInfo{{Hash: "abc"}}, nil
 	}}
@@ -381,24 +383,22 @@ func TestModel_HandleCommitInfo_HintWhenNotApplicable(t *testing.T) {
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	model := result.(Model)
-	assert.False(t, model.overlay.Active(), "overlay must not open in a non-applicable mode")
-	assert.Equal(t, "no commits in this mode", model.commits.hint, "hint surfaces the reason")
-	assert.Equal(t, 0, fake.calls, "no fetch when feature is not applicable")
-	assert.False(t, model.commits.loaded)
+	assert.True(t, model.overlay.Active(), "overlay must open in every mode — commits section hides itself")
+	assert.Equal(t, overlay.KindInfo, model.overlay.Kind())
+	assert.Equal(t, 0, fake.calls, "no commits fetch when feature is not applicable")
 }
 
-func TestModel_HandleCommitInfo_HintWhenSourceNil(t *testing.T) {
+func TestModel_HandleInfo_OpensOverlayWhenSourceNil(t *testing.T) {
 	m := testModel([]string{"a.go"}, nil)
 	m.commits.source = nil
 	m.commits.applicable = false // applicable always collapses to false without a source
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	model := result.(Model)
-	assert.False(t, model.overlay.Active(), "nil source means feature is unavailable")
-	assert.Equal(t, "no commits in this mode", model.commits.hint)
+	assert.True(t, model.overlay.Active(), "overlay opens even with no commit source — session section still useful")
 }
 
-func TestModel_HandleCommitInfo_StoresErrorInSpec(t *testing.T) {
+func TestModel_HandleInfo_StoresErrorInSpec(t *testing.T) {
 	boom := errors.New("git blew up")
 	m := testModel([]string{"a.go"}, nil)
 	m.commits.source = &fakeCommitLog{}
@@ -409,40 +409,15 @@ func TestModel_HandleCommitInfo_StoresErrorInSpec(t *testing.T) {
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	model := result.(Model)
 	assert.True(t, model.overlay.Active(), "overlay opens even on fetch failure so user sees the error")
-	assert.Equal(t, overlay.KindCommitInfo, model.overlay.Kind())
+	assert.Equal(t, overlay.KindInfo, model.overlay.Kind())
 	require.Error(t, model.commits.err)
 	assert.Equal(t, boom, model.commits.err, "error is stored on the model and passed into the spec")
 }
 
-func TestModel_HandleCommitInfo_HintClearsOnNextKey(t *testing.T) {
-	m := testModel([]string{"a.go"}, nil)
-	m.commits.source = nil
-	m.commits.applicable = false
-
-	// first press sets the hint
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	model := result.(Model)
-	require.Equal(t, "no commits in this mode", model.commits.hint)
-
-	// next key clears the hint before dispatching the new action
-	result, _ = model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
-	model = result.(Model)
-	assert.Empty(t, model.commits.hint, "any subsequent key press must clear the transient hint")
-}
-
-func TestModel_HandleCommitInfo_StatusBarShowsHint(t *testing.T) {
-	m := testModel([]string{"a.go"}, nil)
-	m.commits.source = nil
-	m.commits.applicable = false
-
-	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
-	model := result.(Model)
-
-	status := model.statusBarText()
-	assert.Equal(t, "no commits in this mode", status, "status bar surfaces the hint verbatim while it is set")
-}
-
-func TestModel_HandleCommitInfo_ShowsLoadingHintBeforeLoad(t *testing.T) {
+func TestModel_HandleInfo_OpensImmediatelyDuringLoad(t *testing.T) {
+	// regression: pressing `i` before commits finish loading must open the
+	// popup immediately. The commits section renders "loading commits…"
+	// inline; the previous behavior of refusing to open is gone.
 	m := testModel([]string{"a.go"}, nil)
 	m.commits.source = &fakeCommitLog{}
 	m.commits.applicable = true
@@ -450,8 +425,7 @@ func TestModel_HandleCommitInfo_ShowsLoadingHintBeforeLoad(t *testing.T) {
 
 	result, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
 	model := result.(Model)
-	assert.False(t, model.overlay.Active(), "overlay must not open before commits load")
-	assert.Equal(t, "loading commits…", model.commits.hint, "transient hint shown while fetch is in flight")
+	assert.True(t, model.overlay.Active(), "overlay opens immediately even while commits are loading")
 }
 
 func TestModel_ReloadHint_ShownInStatusBar(t *testing.T) {
@@ -469,7 +443,7 @@ func TestModel_ReloadHint_ClearsOnNextKey(t *testing.T) {
 	assert.Empty(t, model.reload.hint, "any key press must clear the reload hint")
 }
 
-func TestModel_HandleCommitInfo_TruncatedFlagPropagates(t *testing.T) {
+func TestModel_HandleInfo_TruncatedFlagPropagates(t *testing.T) {
 	full := make([]diff.CommitInfo, diff.MaxCommits)
 	for i := range full {
 		full[i] = diff.CommitInfo{Hash: "h"}
@@ -680,15 +654,7 @@ func TestModel_CompactHint_ClearsOnNextKey(t *testing.T) {
 }
 
 func TestModel_TransientHint_Priority(t *testing.T) {
-	t.Run("commits wins over reload and compact", func(t *testing.T) {
-		m := testModel([]string{"a.go"}, nil)
-		m.commits.hint = "commits msg"
-		m.reload.hint = "reload msg"
-		m.compact.hint = "compact msg"
-		assert.Equal(t, "commits msg", m.transientHint())
-	})
-
-	t.Run("reload wins over compact when commits empty", func(t *testing.T) {
+	t.Run("reload wins over compact", func(t *testing.T) {
 		m := testModel([]string{"a.go"}, nil)
 		m.reload.hint = "reload msg"
 		m.compact.hint = "compact msg"

@@ -12,6 +12,7 @@ Built for a specific use case: reviewing code changes, plans, and documents with
 - Collapsed diff mode: shows final text with change markers, toggle with `v`
 - Word wrap mode: wraps long lines at viewport boundary with `↪` continuation markers, toggle with `w`
 - Horizontal scroll overflow indicators: truncated diff lines show `«` / `»` markers at the edges to signal hidden content off-screen
+- Vertical scrollbar thumb: a thicker `┃` segment on pane right borders indicates the visible portion of long diffs, file trees, and markdown TOCs; thumb size and position track scroll progress automatically
 - Line numbers: side-by-side old/new line number gutter for diffs, single column for full-context files, toggle with `L`
 - Mercurial support: auto-detects hg repos, translates git-style refs (HEAD, HEAD~N) to Mercurial revsets
 - Jujutsu support: auto-detects jj repos (including colocated git+jj), translates git-style refs to jj revsets (`HEAD` → `@-`, `HEAD~N` → `@` plus N+1 dashes); `--all-files` supported
@@ -25,7 +26,7 @@ Built for a specific use case: reviewing code changes, plans, and documents with
 - Filter file tree to show only annotated files
 - Status line with filename, diff stats, hunk position, line number, and mode indicators
 - Help overlay (`?`) showing all keybindings organized by section
-- Commit info popup (`i`) showing subject + body of every commit in the current ref range (git/hg/jj), useful for restoring the narrative context when reviewing PR-style diffs
+- Info popup (`i`) showing launch scope (mode, VCS, ref, filters, file/status counts, aggregate `+/-` line stats), the optional `--description` prose, and the commit log subject + body for every commit in the current ref range (git/hg/jj) — useful for restoring narrative context when reviewing PR-style diffs
 - Markdown TOC navigation: single-file markdown files in context-only mode show a table-of-contents pane with header navigation and active section tracking
 - All-files mode: browse and annotate all tracked files with `--all-files` (git `ls-files` or jj `file list`), filter with `--include` and `--exclude`
 - No-VCS file review: `--only` files outside a VCS repo (or not in any diff) are shown as context-only with full annotation support
@@ -301,6 +302,8 @@ Positional arguments support several forms:
 | `--blame` | Show blame gutter on startup, env: `REVDIFF_BLAME` | `false` |
 | `--word-diff` | Highlight intra-line word-level changes in paired add/remove lines, env: `REVDIFF_WORD_DIFF` | `false` |
 | `--no-confirm-discard` | Skip confirmation when discarding annotations with Q, env: `REVDIFF_NO_CONFIRM_DISCARD` | `false` |
+| `--no-mouse` | Disable mouse support (scroll wheel, click), env: `REVDIFF_NO_MOUSE` | `false` |
+| `--vim-motion` | Enable vim-style motion preset (counts, `gg`, `G`, `zz`/`zt`/`zb`, `ZZ`/`ZQ`), env: `REVDIFF_VIM_MOTION` | `false` |
 | `--chroma-style` | Chroma color theme for syntax highlighting, env: `REVDIFF_CHROMA_STYLE` | `catppuccin-macchiato` |
 | `--theme` | Load color theme from `~/.config/revdiff/themes/`, env: `REVDIFF_THEME` | |
 | `--dump-theme` | Print currently resolved colors as theme file to stdout and exit | |
@@ -311,10 +314,13 @@ Positional arguments support several forms:
 | `-A`, `--all-files` | Browse all tracked files, not just diffs (git or jj) | `false` |
 | `--stdin` | Review stdin as a scratch buffer (piped or redirected input only) | `false` |
 | `--stdin-name` | Synthetic file name for stdin content; enables extension-based highlighting/TOC | `scratch-buffer` |
+| `--description` | Prose context shown in the info popup (markdown; for multi-line text, use a multi-line quoted shell string or `--description-file`) | |
+| `--description-file` | Read the info-popup description from this file (markdown) | |
 | `-I`, `--include` | Include only files matching prefix, may be repeated, env: `REVDIFF_INCLUDE` (comma-separated) | |
 | `-X`, `--exclude` | Exclude files matching prefix, may be repeated, env: `REVDIFF_EXCLUDE` (comma-separated) | |
 | `-F`, `--only` | Show only matching files by exact path or suffix, may be repeated (e.g. `--only=model.go`) | |
 | `-o`, `--output` | Write annotations to file instead of stdout, env: `REVDIFF_OUTPUT` | |
+| `--annotations` | Preload annotations from a markdown file in `-o` format | |
 | `--history-dir` | Directory for review history auto-saves, env: `REVDIFF_HISTORY_DIR` | `~/.config/revdiff/history/` |
 | `--config` | Path to config file, env: `REVDIFF_CONFIG` | `~/.config/revdiff/config` |
 | `--keys` | Path to keybindings file, env: `REVDIFF_KEYS` | `~/.config/revdiff/keybindings` |
@@ -481,7 +487,14 @@ printf '# Plan\n\nShip it\n' | revdiff --stdin --stdin-name plan.md
 
 # capture annotations from generated output
 some-command | revdiff --stdin --output /tmp/annotations.txt
+
+# round-trip: capture, edit externally, reload
+revdiff -o review.md HEAD~1
+$EDITOR review.md
+revdiff --annotations=review.md HEAD~1
 ```
+
+`--annotations` reads the same markdown format that `-o` writes (see [Output Format](#output-format) below), so any file revdiff produces can be loaded back. You can also hand-author or generate that file from any other source — each record is `## path/to/file.go:LINE (+)` followed by the comment body — then step through the comments inline against the actual diff, edit or delete them in the TUI, and quit with `q` to write the final set to stdout (or to `-o`).
 
 ### All-Files Mode
 
@@ -522,7 +535,7 @@ Two scenarios trigger this mode:
 
 Use `--stdin` to review arbitrary piped or redirected text as a single synthetic file. All lines are shown as context, so the normal single-file review flow still works: annotations, file-level notes, search, wrap, collapsed mode, and structured output.
 
-`--stdin` is explicit and mutually exclusive with refs, `--staged`, `--only`, `--all-files`, `--include`, and `--exclude`. stdin mode requires piped or redirected input; plain terminal stdin is rejected to avoid accidentally launching an empty scratch buffer.
+`--stdin` is explicit and mutually exclusive with refs, `--staged`, `--only`, `--all-files`, `--include`, `--exclude`, and `--annotations`. stdin mode requires piped or redirected input; plain terminal stdin is rejected to avoid accidentally launching an empty scratch buffer.
 
 Use `--stdin-name` to control the synthetic filename. This gives annotation output a stable key and enables filename-based syntax highlighting or markdown TOC activation:
 
@@ -531,6 +544,22 @@ echo "plain text" | revdiff --stdin
 printf '# Plan\n\nBody\n' | revdiff --stdin --stdin-name plan.md
 git show HEAD~1:README.md | revdiff --stdin --stdin-name README.md
 ```
+
+### Review Description
+
+Use `--description` (or `--description-file=path.md`) to attach prose context to a review. The text is rendered at the top of the info popup (`i` key), with the same markdown highlighting used for `.md` files in the diff view. Useful when an agent (or a script) launches revdiff on your behalf and you come back to it later — the popup tells you what the change is and why.
+
+```bash
+revdiff HEAD~3 --description="# Refactor auth middleware
+
+Drop session-token storage to meet new compliance requirements.
+See ticket SEC-441 for context."
+
+# longer descriptions: keep the markdown in a file
+revdiff HEAD~3 --description-file=.review-description.md
+```
+
+`--description` and `--description-file` are mutually exclusive. The description section is hidden when neither is set, so the flag is purely additive — existing invocations are unchanged.
 
 ### Markdown TOC Navigation
 
@@ -628,7 +657,7 @@ While the annotation input is active, press `Ctrl+E` to hand off the current tex
 | `T` | Open theme selector with live preview |
 | `f` | Toggle filter: all files / annotated only (shown when annotations exist) |
 | `?` | Toggle help overlay showing all keybindings |
-| `i` | Toggle commit info popup (subject + body of commits in the current ref range; git/hg/jj only) |
+| `i` | Toggle info popup — review scope (mode, VCS, ref, filters, file/status counts, aggregate `+/-` stats) plus the commit log for the current ref range when applicable |
 | `R` | Reload diff from VCS (warns if annotations exist) |
 | `q` | Quit, output annotations to stdout |
 | `Q` | Discard all annotations and quit (confirms if annotations exist) |
@@ -669,6 +698,31 @@ The status bar shows a fixed row of mode indicators on the right side. All slots
 
 On narrow terminals, the left-hand segments are dropped before the icons: search position first, then line and hunk info, then the filename truncates. The icon row on the right stays put.
 
+### Mouse Support
+
+revdiff enables mouse tracking by default so the scroll wheel and left-click work consistently across terminals.
+
+- **Scroll wheel**: scrolls whichever pane the cursor is over (tree/TOC or diff). Three lines per notch.
+- **Shift+scroll**: half-page scroll in whichever pane the cursor is over.
+- **Left-click in the tree**: focuses the tree and selects/loads the clicked entry (same as pressing `j`/`k` to land there). Clicking a directory row moves the cursor but does not load a file.
+- **Left-click in the diff**: focuses the diff and moves the cursor to the clicked line. Enables a "click, then `a`" annotation flow.
+- **Left-click in the TOC pane** (single-file markdown): focuses the TOC and selects the clicked header.
+- **Scroll wheel in overlay popups** (info, annotations, themes): scrolls the popup content or moves its cursor. Shift+wheel uses a half-page step. In the theme selector, wheel previews each theme live. Help overlay has no scrollable or selectable content so mouse events are ignored.
+- **Left-click in the annotation popup**: jumps to the clicked annotation (same as pressing `Enter`).
+- **Left-click in the theme popup**: confirms the clicked theme (same as pressing `Enter`). Clicks on the filter row or blank separator are ignored.
+
+Horizontal wheel, right-click, middle-click, drag selection, and clicks on the status bar or diff header are intentionally ignored. Clicks outside an open overlay are swallowed — dismiss an overlay with `Esc` or its toggle key. Modal states (annotation input, search input, confirm discard, reload confirm) swallow mouse events entirely.
+
+**Text selection trade-off** — once mouse tracking is on, plain drag is captured by revdiff. For terminal-native text selection:
+
+- **kitty**: hold `Ctrl+Shift` while dragging
+- **iTerm2**: hold `Option` while dragging
+- **most other terminals**: hold `Shift` while dragging
+
+Because the tree pane is rendered alongside the diff on the same rows, multi-line Shift+drag will include tree content. For clean copies of diff text, use your terminal's block-select mode (Option+drag in iTerm2, Ctrl+Shift+drag in kitty) or run with `--no-mouse` to disable mouse capture entirely.
+
+Opt out with `--no-mouse`, `REVDIFF_NO_MOUSE=true`, or `no-mouse = true` in the config file.
+
 ### Custom Keybindings
 
 All keybindings can be customized via a keybindings file at `~/.config/revdiff/keybindings`. Override the path with `--keys` flag or `REVDIFF_KEYS` env var.
@@ -695,10 +749,21 @@ revdiff --dump-keys > ~/.config/revdiff/keybindings
 
 Then edit to taste. Modal keys (annotation input, search input, confirm discard) are not remappable.
 
+**Chord bindings (ctrl/alt leader):** bind a two-stage chord by joining the leader and second key with `>`. The leader must be a `ctrl+*` or `alt+*` combo; the second stage is any single key. Only two stages are supported.
+
+```
+map ctrl+w>x mark_reviewed
+map alt+t>n theme_select
+```
+
+When the leader is pressed, the status bar shows `Pending: ctrl+w, esc to cancel`; press the second key to dispatch, or `esc` to cancel silently. Binding a key as both a standalone action and a chord prefix drops the standalone binding (the chord wins, with a warning). Chord bindings work under non-Latin keyboard layouts — the second-stage key is translated via the same layout-resolve fallback as single-key bindings.
+
+**macOS note:** `alt+*` leaders require your terminal to send Option as Meta/Alt. Most terminals default to "Option composes special characters" (e.g. `Option+T` → `†`), in which case Alt chords silently won't fire. To enable: iTerm2 → *Profiles → Keys → Left/Right Option key → `Esc+`*; Terminal.app → *Profiles → Keyboard → Use Option as Meta key*; Kitty → `macos_option_as_alt yes`; Ghostty → `macos-option-as-alt = true`. If you'd rather not touch terminal settings, use `ctrl+*` leaders — those work everywhere with no configuration.
+
 <details>
 <summary>Available actions (click to expand)</summary>
 
-**Navigation:** `down`, `up`, `page_down`, `page_up`, `half_page_down`, `half_page_up`, `home`, `end`, `scroll_left`, `scroll_right`
+**Navigation:** `down`, `up`, `page_down`, `page_up`, `half_page_down`, `half_page_up`, `home`, `end`, `scroll_left`, `scroll_right`, `scroll_center`, `scroll_top`, `scroll_bottom`
 
 **File/Hunk:** `next_item`, `prev_item`, `next_hunk`, `prev_hunk`
 
@@ -708,11 +773,31 @@ Then edit to taste. Modal keys (annotation input, search input, confirm discard)
 
 **Annotations:** `confirm` (annotate line / select file), `annotate_file`, `delete_annotation`, `annot_list`
 
-**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `theme_select`, `filter`, `commit_info`, `reload`
+**View:** `toggle_collapsed`, `toggle_compact`, `toggle_wrap`, `toggle_tree`, `toggle_line_numbers`, `toggle_blame`, `toggle_word_diff`, `toggle_hunk`, `toggle_untracked`, `mark_reviewed`, `theme_select`, `filter`, `info`, `reload`
 
 **Quit:** `quit`, `discard_quit`, `help`, `dismiss`
 
 </details>
+
+### Vim-motion Preset
+
+Opt-in vim-style motion layer activated via `--vim-motion`, `REVDIFF_VIM_MOTION=true`, or `vim-motion = true` in the config file. Off by default — when off, existing single-key bindings are unchanged.
+
+| Keys | Action |
+|------|--------|
+| `<N>j` / `<N>k` | Move cursor N lines down/up (diff pane, 1-9999) |
+| `gg` | Jump to first line (diff pane) |
+| `G` | Jump to last line (diff pane) |
+| `<N>G` | Goto line N (diff pane) |
+| `zz` | Center viewport on cursor (diff pane) |
+| `zt` | Align viewport top on cursor (diff pane) |
+| `zb` | Align viewport bottom on cursor (diff pane) |
+| `ZZ` | Quit (any pane) |
+| `ZQ` | Discard annotations and quit (any pane) |
+
+When the preset is on, the digits `0`-`9` and the leader keys `g`, `z`, `Z` are intercepted before the regular keymap, so any standalone binding on those keys is overridden while the flag is active. `<N>j`/`<N>k`/`<N>G` and `gg`/`zz`/`zt`/`zb` apply to the diff pane only — in the file tree they fall through to the normal bindings. `ZZ` and `ZQ` work from any pane. Press `Esc` to silently cancel a pending leader; an unknown second key surfaces a transient `Unknown: <chord>` hint in the status bar. A bare digit `0` is not consumed (falls through to whatever binding is mapped); counts over 9999 are clamped. Modal keys (search input, annotation input, overlay navigation) always take precedence over the interceptor, and `ctrl+*`/`alt+*` chord bindings keep working orthogonally.
+
+The help overlay (`?`) shows a dedicated **Vim motion** section listing all eight preset bindings when `--vim-motion` is on; when off, the section is hidden.
 
 ### Output Format
 

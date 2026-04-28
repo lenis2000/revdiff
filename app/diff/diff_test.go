@@ -15,7 +15,7 @@ import (
 
 func TestParseUnifiedDiff_SimpleAdd(t *testing.T) {
 	raw := readFixture(t, "simple_add.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 
 	// expected: context, blank, context, add, add, add, context, context
@@ -57,7 +57,7 @@ func TestParseUnifiedDiff_SimpleAdd(t *testing.T) {
 
 func TestParseUnifiedDiff_SimpleRemove(t *testing.T) {
 	raw := readFixture(t, "simple_remove.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 	require.NotEmpty(t, lines, "expected non-empty result")
 
@@ -78,17 +78,20 @@ func TestParseUnifiedDiff_SimpleRemove(t *testing.T) {
 
 func TestParseUnifiedDiff_MultiHunk(t *testing.T) {
 	raw := readFixture(t, "multi_hunk.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 
-	// verify divider exists between hunks
-	var dividers int
+	// verify dividers carry line-count labels.
+	// fixture: hunk 1 at @@ -2,3, hunk 2 at @@ -10,3.
+	//   - leading divider: line 1 precedes first hunk → 1 line.
+	//   - between-hunks: prevOldEnd=5 after hunk 1, next at 10 → 5 lines skipped.
+	var dividers []string
 	for _, l := range lines {
 		if l.ChangeType == ChangeDivider {
-			dividers++
+			dividers = append(dividers, l.Content)
 		}
 	}
-	assert.Equal(t, 1, dividers, "expected 1 divider between two hunks")
+	assert.Equal(t, []string{"⋯ 1 line ⋯", "⋯ 5 lines ⋯"}, dividers, "expected leading + between-hunks dividers")
 
 	// verify additions in both hunks
 	var additions []string
@@ -100,9 +103,222 @@ func TestParseUnifiedDiff_MultiHunk(t *testing.T) {
 	assert.Equal(t, []string{`import "os"`, "    os.Exit(0)"}, additions)
 }
 
+// TestParseUnifiedDiff_GapLabels exercises every gap-label branch through the
+// real parser (not a helper in isolation). Covers: plural gaps, singular gap,
+// omitted-length hunk headers (@@ -N +N @@), insertion-only hunks (@@ -K,0 ...),
+// start-of-file insertion (@@ -0,0 ...), and three-hunk chains.
+func TestParseUnifiedDiff_GapLabels(t *testing.T) {
+	tests := []struct {
+		name     string
+		raw      string
+		dividers []string
+	}{
+		{
+			name: "plural gap, standard two-hunk",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n a\n-b\n+B\n" +
+				"@@ -10,3 +10,3 @@\n x\n-y\n+Y\n",
+			dividers: []string{"⋯ 6 lines ⋯"},
+		},
+		{
+			name: "singular gap",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n a\n-b\n+B\n" +
+				"@@ -5,3 +5,3 @@\n x\n-y\n+Y\n",
+			dividers: []string{"⋯ 1 line ⋯"},
+		},
+		{
+			name: "omitted length (implicit 1) on both sides",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1 +1 @@\n-old\n+new\n" +
+				"@@ -5 +5 @@\n-old2\n+new2\n",
+			dividers: []string{"⋯ 3 lines ⋯"},
+		},
+		{
+			name: "insertion-only prior hunk (oldLen==0, mid-file)",
+			raw: "--- a\n+++ b\n" +
+				"@@ -5,0 +6,2 @@\n+x\n+y\n" +
+				"@@ -10,3 +12,3 @@\n p\n-q\n+Q\n",
+			// leading: lines 1..4 before first hunk = 4 lines.
+			// between: prior hunk inserts between old lines 5 and 6 (prevOldEnd=6), next at 10 → gap=4.
+			dividers: []string{"⋯ 4 lines ⋯", "⋯ 4 lines ⋯"},
+		},
+		{
+			name: "insertion-only prior hunk at start (@@ -0,0)",
+			raw: "--- a\n+++ b\n" +
+				"@@ -0,0 +1,2 @@\n+x\n+y\n" +
+				"@@ -5,3 +7,3 @@\n p\n-q\n+Q\n",
+			// prior hunk prepends; next untouched old line is 1. gap = 5 - 1 = 4.
+			dividers: []string{"⋯ 4 lines ⋯"},
+		},
+		{
+			name: "three-hunk chain, multiple dividers",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,2 +1,2 @@\n a\n-b\n+B\n" +
+				"@@ -5,2 +5,2 @@\n p\n-q\n+Q\n" +
+				"@@ -20,2 +20,2 @@\n x\n-y\n+Y\n",
+			dividers: []string{"⋯ 2 lines ⋯", "⋯ 13 lines ⋯"},
+		},
+		{
+			name: "leading divider when first hunk starts after line 1",
+			raw: "--- a\n+++ b\n" +
+				"@@ -48,3 +48,3 @@\n ctx\n-old\n+new\n",
+			// 47 unchanged lines precede the first hunk.
+			dividers: []string{"⋯ 47 lines ⋯"},
+		},
+		{
+			name: "no leading divider when first hunk starts at line 1",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n ctx\n-old\n+new\n",
+			dividers: nil,
+		},
+		{
+			name: "leading + between-hunks dividers",
+			raw: "--- a\n+++ b\n" +
+				"@@ -10,2 +10,2 @@\n a\n+b\n" +
+				"@@ -20,2 +20,2 @@\n c\n+d\n",
+			// 9 lines before first hunk; 8 lines between (prevOldEnd=12, next oldStart=20).
+			dividers: []string{"⋯ 9 lines ⋯", "⋯ 8 lines ⋯"},
+		},
+		{
+			name: "new file (first hunk @@ -0,0 ...) suppresses leading divider",
+			raw: "--- /dev/null\n+++ b\n" +
+				"@@ -0,0 +1,2 @@\n+x\n+y\n",
+			// oldStart=0, gap = 0-1 = -1, no divider.
+			dividers: nil,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lines, err := parseUnifiedDiff(tc.raw, 0)
+			require.NoError(t, err)
+
+			var got []string
+			for _, l := range lines {
+				if l.ChangeType == ChangeDivider {
+					got = append(got, l.Content)
+				}
+			}
+			assert.Equal(t, tc.dividers, got)
+		})
+	}
+}
+
+// TestParseUnifiedDiff_TrailingDivider covers trailing divider emission driven
+// by the totalOldLines parameter — the caller-supplied total line count of the
+// pre-change file. 0 (unknown) skips the trailing divider; positive values emit
+// a divider only when the last hunk does not reach EOF.
+func TestParseUnifiedDiff_TrailingDivider(t *testing.T) {
+	tests := []struct {
+		name          string
+		raw           string
+		totalOldLines int
+		wantDividers  []string
+	}{
+		{
+			name: "trailing plural — hunk ends at line 10, total 300",
+			raw: "--- a\n+++ b\n" +
+				"@@ -8,3 +8,3 @@\n a\n-b\n+B\n",
+			// prevOldEnd=11, trailing = 300-11+1 = 290.
+			totalOldLines: 300,
+			wantDividers:  []string{"⋯ 7 lines ⋯", "⋯ 290 lines ⋯"},
+		},
+		{
+			name: "trailing singular — exactly one line after last hunk",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n a\n-b\n+B\n",
+			// prevOldEnd=4, totalOldLines=4, gap = 4-4+1 = 1 → singular label
+			totalOldLines: 4,
+			wantDividers:  []string{"⋯ 1 line ⋯"},
+		},
+		{
+			name: "no trailing — last hunk covers to EOF",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n a\n-b\n+B\n",
+			// prevOldEnd=4, total=3, 4>3 → no trailing.
+			totalOldLines: 3,
+			wantDividers:  nil,
+		},
+		{
+			name: "totalOldLines=0 → no trailing (unknown)",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,3 +1,3 @@\n a\n-b\n+B\n",
+			totalOldLines: 0,
+			wantDividers:  nil,
+		},
+		{
+			name: "leading + between + trailing",
+			raw: "--- a\n+++ b\n" +
+				"@@ -5,2 +5,2 @@\n a\n+b\n" +
+				"@@ -15,2 +15,2 @@\n c\n+d\n",
+			// leading: 4 lines. between: prevOldEnd=7, next=15 → 8. trailing: prevOldEnd=17, total=50 → 34.
+			totalOldLines: 50,
+			wantDividers:  []string{"⋯ 4 lines ⋯", "⋯ 8 lines ⋯", "⋯ 34 lines ⋯"},
+		},
+		{
+			name: "empty diff with totalOldLines set emits nothing (no hunks)",
+			raw:  "",
+			// no hunks processed → prevOldEnd stays 1 → trailing skipped by guard.
+			totalOldLines: 100,
+			wantDividers:  nil,
+		},
+		{
+			name: "insertion-only LAST hunk computes trailing from prevOldEnd=K+1",
+			raw: "--- a\n+++ b\n" +
+				"@@ -1,1 +1,1 @@\n-a\n+A\n" +
+				"@@ -10,0 +11,2 @@\n+x\n+y\n",
+			// between hunks: prevOldEnd after hunk 1 = 2, next oldStart = 10 → gap = 8.
+			// last hunk is insertion-only: prevOldEnd = 10 + max(0,1) = 11.
+			// trailing: totalOldLines=20, 20 - 11 + 1 = 10.
+			totalOldLines: 20,
+			wantDividers:  []string{"⋯ 8 lines ⋯", "⋯ 10 lines ⋯"},
+		},
+		{
+			name: "deleted file (@@ -1,N +0,0 @@) — last hunk covers EOF, no trailing",
+			raw: "--- a\n+++ /dev/null\n" +
+				"@@ -1,3 +0,0 @@\n-a\n-b\n-c\n",
+			// prevOldEnd = 1 + 3 = 4 = totalOldLines + 1, so gap = 3-4+1 = 0 → no divider.
+			totalOldLines: 3,
+			wantDividers:  nil,
+		},
+		{
+			name: "exact boundary prevOldEnd == totalOldLines + 1 emits no trailing",
+			raw: "--- a\n+++ b\n" +
+				"@@ -5,3 +5,3 @@\n a\n-b\n+B\n",
+			// leading: 4 lines (5-1). prevOldEnd = 8. totalOldLines = 7 → 7-8+1 = 0 → no trailing.
+			totalOldLines: 7,
+			wantDividers:  []string{"⋯ 4 lines ⋯"},
+		},
+		{
+			name: "insertion-at-start hunk (@@ -0,0) with totalOldLines>0 emits trailing",
+			raw: "--- a\n+++ b\n" +
+				"@@ -0,0 +1,2 @@\n+x\n+y\n",
+			// hypothetical/malformed: prevOldEnd stays at 1 after the hunk,
+			// but sawHunk is true, so the trailing guard still fires.
+			// gap = totalOldLines - prevOldEnd + 1 = 10 - 1 + 1 = 10.
+			totalOldLines: 10,
+			wantDividers:  []string{"⋯ 10 lines ⋯"},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lines, err := parseUnifiedDiff(tc.raw, tc.totalOldLines)
+			require.NoError(t, err)
+
+			var got []string
+			for _, l := range lines {
+				if l.ChangeType == ChangeDivider {
+					got = append(got, l.Content)
+				}
+			}
+			assert.Equal(t, tc.wantDividers, got)
+		})
+	}
+}
+
 func TestParseUnifiedDiff_MixedChanges(t *testing.T) {
 	raw := readFixture(t, "mixed_changes.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 
 	types := make([]ChangeType, 0, len(lines))
@@ -126,14 +342,14 @@ func TestParseUnifiedDiff_MixedChanges(t *testing.T) {
 }
 
 func TestParseUnifiedDiff_Empty(t *testing.T) {
-	lines, err := parseUnifiedDiff("")
+	lines, err := parseUnifiedDiff("", 0)
 	require.NoError(t, err)
 	assert.Empty(t, lines)
 }
 
 func TestParseUnifiedDiff_Binary(t *testing.T) {
 	raw := readFixture(t, "binary.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 	require.Len(t, lines, 1)
 	assert.Equal(t, BinaryPlaceholder, lines[0].Content)
@@ -145,7 +361,7 @@ func TestParseUnifiedDiff_Binary(t *testing.T) {
 
 func TestParseUnifiedDiff_BinaryNewFile(t *testing.T) {
 	raw := "diff --git a/new.bin b/new.bin\nnew file mode 100644\nindex 0000000..dd12d3a\nBinary files /dev/null and b/new.bin differ\n"
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 	require.Len(t, lines, 1)
 	assert.Equal(t, "(new binary file)", lines[0].Content)
@@ -154,7 +370,7 @@ func TestParseUnifiedDiff_BinaryNewFile(t *testing.T) {
 
 func TestParseUnifiedDiff_BinaryDeleted(t *testing.T) {
 	raw := "diff --git a/old.bin b/old.bin\ndeleted file mode 100644\nindex 2dfe7e4..0000000\nBinary files a/old.bin and /dev/null differ\n"
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 	require.Len(t, lines, 1)
 	assert.Equal(t, "(deleted binary file)", lines[0].Content)
@@ -163,7 +379,7 @@ func TestParseUnifiedDiff_BinaryDeleted(t *testing.T) {
 
 func TestParseUnifiedDiff_LineNumbers(t *testing.T) {
 	raw := readFixture(t, "simple_add.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 
 	// additions should have OldNum=0
@@ -185,7 +401,7 @@ func TestParseUnifiedDiff_LineNumbers(t *testing.T) {
 
 func TestParseUnifiedDiff_RemoveLineNumbers(t *testing.T) {
 	raw := readFixture(t, "simple_remove.diff")
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err)
 
 	for _, l := range lines {
@@ -306,7 +522,7 @@ func TestParseUnifiedDiff_LongLine(t *testing.T) {
 	longContent := strings.Repeat("x", 100_000)
 	raw := "diff --git a/big.js b/big.js\n--- a/big.js\n+++ b/big.js\n@@ -1,1 +1,2 @@\n context\n+" + longContent + "\n"
 
-	lines, err := parseUnifiedDiff(raw)
+	lines, err := parseUnifiedDiff(raw, 0)
 	require.NoError(t, err, "should handle lines up to 1MB without error")
 
 	var hasAdd bool
@@ -685,7 +901,7 @@ func TestGit_ParseCommitLog(t *testing.T) {
 
 	t.Run("subject containing \\x1f absorbs into final field and US byte is sanitized", func(t *testing.T) {
 		// crafted subject with US byte embedded — SplitN(4) absorbs all trailing
-		// \x1f into the last field; sanitizeCommitText then drops the US byte so
+		// \x1f into the last field; SanitizeCommitText then drops the US byte so
 		// the rendered subject has no framing artifacts
 		raw := "hash\x1fauthor\x1f2026-04-10T12:00:00-04:00\x1fsubject\x1fwith-us\nactual body\x00"
 		got := g.parseCommitLog(raw)
@@ -715,7 +931,7 @@ func TestGit_ParseCommitLog(t *testing.T) {
 	})
 
 	t.Run("author with crafted US byte collapses into shifted fields but stays sanitized", func(t *testing.T) {
-		// delimiter injection in author shifts downstream fields. sanitizeCommitText
+		// delimiter injection in author shifts downstream fields. SanitizeCommitText
 		// still strips any ESC/BEL/C1 bytes in whatever content ends up in each
 		// parsed slot, so no terminal-control sequence reaches the overlay
 		raw := "hash\x1fEvil\x1fname\x1fwith\x1b[31mred\x1b[0m <e@x>\nbody\x00"
@@ -839,7 +1055,7 @@ func TestSanitizeCommitText(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, sanitizeCommitText(tt.in))
+			assert.Equal(t, tt.want, SanitizeCommitText(tt.in))
 		})
 	}
 }
@@ -895,6 +1111,58 @@ func gitCmd(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	out, err := cmd.CombinedOutput()
 	require.NoError(t, err, "git %v failed: %s", args, string(out))
+}
+
+func TestGit_TotalOldLines(t *testing.T) {
+	dir := setupTestRepo(t)
+	// commit A: 5 lines
+	writeFile(t, dir, "f.txt", "a\nb\nc\nd\ne\n")
+	gitCmd(t, dir, "add", "f.txt")
+	gitCmd(t, dir, "commit", "-m", "A")
+	commitA, err := exec.Command("git", "-C", dir, "rev-parse", "HEAD").Output() //nolint:gosec // test-controlled args
+	require.NoError(t, err)
+	refA := strings.TrimSpace(string(commitA))
+
+	// commit B: 3 lines (same file, modified)
+	writeFile(t, dir, "f.txt", "a\nB\nC\n")
+	gitCmd(t, dir, "add", "f.txt")
+	gitCmd(t, dir, "commit", "-m", "B")
+
+	// working tree: 7 lines
+	writeFile(t, dir, "f.txt", "a\nB\nC\nd\ne\nf\ng\n")
+
+	// staged version (10 lines)
+	writeFile(t, dir, "staged.txt", strings.Repeat("x\n", 10))
+	gitCmd(t, dir, "add", "staged.txt")
+
+	// file without trailing newline
+	writeFile(t, dir, "notrail.txt", "line1\nline2")
+	gitCmd(t, dir, "add", "notrail.txt")
+	gitCmd(t, dir, "commit", "-m", "notrail")
+
+	g := NewGit(dir)
+
+	tests := []struct {
+		name   string
+		ref    string
+		file   string
+		staged bool
+		want   int
+	}{
+		{"HEAD commit B — 3 lines", "HEAD", "f.txt", false, 3},
+		{"commit A — 5 lines via single ref", refA, "f.txt", false, 5},
+		{"range A..HEAD — left operand A, 5 lines", refA + "..HEAD", "f.txt", false, 5},
+		{"triple-dot A...HEAD — takes left operand A, 5 lines", refA + "...HEAD", "f.txt", false, 5},
+		{"empty ref + staged → HEAD, 3 lines", "", "f.txt", true, 3},
+		{"non-existent ref → 0", "nonexistent-ref-xyz", "f.txt", false, 0},
+		{"non-existent file → 0", "HEAD", "missing.txt", false, 0},
+		{"file without trailing newline counts final line", "HEAD", "notrail.txt", false, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, g.totalOldLines(tc.ref, tc.file, tc.staged))
+		})
+	}
 }
 
 func TestMatchesPrefix(t *testing.T) {
@@ -970,7 +1238,7 @@ func TestGit_UntrackedFiles(t *testing.T) {
 	// .gitignore itself is untracked since we just created it
 }
 
-func TestGitContextArg(t *testing.T) {
+func TestUnifiedContextArg(t *testing.T) {
 	tests := []struct {
 		name         string
 		contextLines int
@@ -986,7 +1254,7 @@ func TestGitContextArg(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, gitContextArg(tt.contextLines))
+			assert.Equal(t, tt.want, unifiedContextArg(tt.contextLines))
 		})
 	}
 }
@@ -1045,4 +1313,30 @@ func TestGit_FileDiff_SmallContext(t *testing.T) {
 		}
 	}
 	assert.Equal(t, 19, fullCtx, "expected 19 context lines with full-file context")
+}
+
+func TestCountChanges(t *testing.T) {
+	tests := []struct {
+		name        string
+		lines       []DiffLine
+		wantAdds    int
+		wantRemoves int
+	}{
+		{name: "empty", lines: nil, wantAdds: 0, wantRemoves: 0},
+		{name: "all context", lines: []DiffLine{{ChangeType: ChangeContext}, {ChangeType: ChangeContext}}, wantAdds: 0, wantRemoves: 0},
+		{name: "dividers ignored", lines: []DiffLine{{ChangeType: ChangeDivider}, {ChangeType: ChangeAdd}}, wantAdds: 1, wantRemoves: 0},
+		{name: "mixed", lines: []DiffLine{
+			{ChangeType: ChangeAdd}, {ChangeType: ChangeAdd}, {ChangeType: ChangeAdd},
+			{ChangeType: ChangeRemove},
+			{ChangeType: ChangeContext},
+			{ChangeType: ChangeDivider},
+		}, wantAdds: 3, wantRemoves: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			adds, removes := CountChanges(tt.lines)
+			assert.Equal(t, tt.wantAdds, adds, "adds")
+			assert.Equal(t, tt.wantRemoves, removes, "removes")
+		})
+	}
 }

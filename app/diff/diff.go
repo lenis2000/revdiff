@@ -20,7 +20,7 @@ const (
 	ChangeAdd     ChangeType = "+"
 	ChangeRemove  ChangeType = "-"
 	ChangeContext ChangeType = " "
-	ChangeDivider ChangeType = "~" // separates non-adjacent hunks
+	ChangeDivider ChangeType = "~" // marks a skipped unchanged region (leading, between-hunk, or trailing)
 
 	// fullContextSentinel is the numeric threshold that callers use to request
 	// full-file diff context. contextLines <= 0 or >= fullContextSentinel causes
@@ -28,8 +28,8 @@ const (
 	fullContextSentinel = 1000000
 
 	// fullFileContext is the -U value treated as "give me the full file"; use
-	// gitContextArg / hgContextArg helpers at call sites to choose between full-file
-	// and small-context based on the caller's contextLines value.
+	// unifiedContextArg (git/hg) or jjContextArg at call sites to choose
+	// between full-file and small-context based on the caller's contextLines value.
 	fullFileContext = "-U1000000"
 
 	// MaxLineLength is the maximum line length (in bytes) that scanners will accept.
@@ -45,7 +45,7 @@ const (
 type DiffLine struct {
 	OldNum        int        // line number in old version (0 for additions)
 	NewNum        int        // line number in new version (0 for removals)
-	Content       string     // line content without the +/- prefix
+	Content       string     // line content without the +/- prefix; for ChangeDivider rows it is a human-readable "⋯ N line[s] ⋯" label — never pattern-match it, dispatch on ChangeType
 	ChangeType    ChangeType // changeAdd, ChangeRemove, ChangeContext, or ChangeDivider
 	IsBinary      bool       // true when this line is a binary file placeholder
 	IsPlaceholder bool       // true for non-content placeholders (broken symlink, non-regular file, too-long lines)
@@ -77,13 +77,29 @@ func FileEntryPaths(entries []FileEntry) []string {
 	return paths
 }
 
+// CountChanges tallies ChangeAdd and ChangeRemove lines in a DiffLine slice.
+// ChangeContext and ChangeDivider are excluded; new ChangeType values would
+// also fall through, which is the safe default for a line-stat counter.
+func CountChanges(lines []DiffLine) (adds, removes int) {
+	for _, dl := range lines {
+		switch dl.ChangeType {
+		case ChangeAdd:
+			adds++
+		case ChangeRemove:
+			removes++
+		case ChangeContext, ChangeDivider:
+		}
+	}
+	return adds, removes
+}
+
 // MaxCommits is the hard cap on the number of commits returned by any CommitLogger
 // implementation. Callers should treat a result of exactly MaxCommits entries as
-// potentially truncated and surface that to the user (e.g. via CommitInfoSpec.Truncated).
+// potentially truncated and surface that to the user (e.g. via overlay.InfoSpec.Truncated).
 const MaxCommits = 500
 
 // CommitInfo holds metadata and message fields for a single commit in a ref range.
-// Author, Subject, and Body are pre-sanitized by sanitizeCommitText so overlay
+// Author, Subject, and Body are pre-sanitized by SanitizeCommitText so overlay
 // renderers can treat them as literal text without a second sanitization pass.
 type CommitInfo struct {
 	Hash    string    // full hash or VCS change id
@@ -115,15 +131,17 @@ type CommitLogger interface {
 const commitLogFormat = "%H%x1f%an <%ae>%x1f%cI%x1f%s%n%b"
 
 // ansiCSIRe matches complete ANSI CSI escape sequences (ESC [ ... final-byte).
-// Used by sanitizeCommitText to neutralize ANSI injection via crafted commit messages.
+// Used by SanitizeCommitText to neutralize ANSI injection via crafted commit messages.
 //
 //nolint:gocritic // explicit ASCII 0x20..0x2F range for CSI intermediate bytes
 var ansiCSIRe = regexp.MustCompile("\x1b\\[[0-9;?]*[\x20-\x2f]*[a-zA-Z~]")
 
-// sanitizeCommitText neutralizes bytes that could trigger terminal side effects
+// SanitizeCommitText neutralizes bytes that could trigger terminal side effects
 // when a crafted commit Author/Subject/Body is rendered verbatim inside the
 // overlay. Used by VCS CommitLog parsers so the overlay renderer can treat the
-// fields as literal text without a second pass.
+// fields as literal text without a second pass. Also reused by review-info
+// description and detail-row sanitization so all untrusted text routes through
+// one strip path with identical semantics.
 //
 // Strips:
 //   - ANSI CSI sequences (ESC [ ... final-byte) and stray ESC bytes
@@ -146,7 +164,7 @@ var ansiCSIRe = regexp.MustCompile("\x1b\\[[0-9;?]*[\x20-\x2f]*[a-zA-Z~]")
 // utf8.DecodeRuneInString so valid UTF-8 multi-byte sequences (CJK, emoji)
 // pass through unchanged even when their continuation bytes fall in the C1
 // byte range.
-func sanitizeCommitText(s string) string {
+func SanitizeCommitText(s string) string {
 	if !hasUnsafeContent(s) {
 		return s
 	}
@@ -176,7 +194,7 @@ func sanitizeCommitText(s string) string {
 	return b.String()
 }
 
-// hasUnsafeContent is a fast-path check used by sanitizeCommitText to skip the
+// hasUnsafeContent is a fast-path check used by SanitizeCommitText to skip the
 // full rune scan when s contains no ESC byte, no unsafe rune, and no invalid
 // UTF-8 byte.
 func hasUnsafeContent(s string) bool {
@@ -197,7 +215,7 @@ func hasUnsafeContent(s string) bool {
 }
 
 // isUnsafeRune reports whether r should be dropped from commit metadata before
-// rendering. See sanitizeCommitText for the full rationale; briefly: TAB, LF,
+// rendering. See SanitizeCommitText for the full rationale; briefly: TAB, LF,
 // and printable runes are kept, everything else in the C0/DEL/C1 ranges
 // (including CR) is dropped.
 func isUnsafeRune(r rune) bool {
@@ -248,7 +266,7 @@ func NewGit(workDir string) *Git {
 //
 // The result is capped at MaxCommits entries. Callers should treat a result
 // of exactly MaxCommits length as potentially truncated and signal that to
-// the user via CommitInfoSpec.Truncated.
+// the user via overlay.InfoSpec.Truncated.
 //
 // Author, Subject, and Body are sanitized (ANSI escape sequences, C0/DEL/C1
 // control bytes, and VCS framing delimiters stripped) to neutralize terminal
@@ -304,9 +322,9 @@ func (g *Git) parseCommitLog(raw string) []CommitInfo {
 		subject, body := splitCommitDesc(fields[3])
 		ci := CommitInfo{
 			Hash:    fields[0],
-			Author:  sanitizeCommitText(fields[1]),
-			Subject: sanitizeCommitText(subject),
-			Body:    sanitizeCommitText(body),
+			Author:  SanitizeCommitText(fields[1]),
+			Subject: SanitizeCommitText(subject),
+			Body:    SanitizeCommitText(body),
 		}
 		if t, err := time.Parse(time.RFC3339, fields[2]); err == nil {
 			ci.Date = t
@@ -384,14 +402,20 @@ func (g *Git) ChangedFiles(ref string, staged bool) ([]FileEntry, error) {
 // context; positive values below the sentinel request that many lines on each side of a hunk.
 func (g *Git) FileDiff(ref, file string, staged bool, contextLines int) ([]DiffLine, error) {
 	args := g.diffArgs(ref, staged)
-	args = append(args, gitContextArg(contextLines), "--", file)
+	args = append(args, unifiedContextArg(contextLines), "--", file)
 
 	out, err := g.runGit(args...)
 	if err != nil {
 		return nil, fmt.Errorf("get file diff for %s: %w", file, err)
 	}
 
-	lines, err := parseUnifiedDiff(out)
+	// trailing divider is only meaningful in compact mode — full-file mode always
+	// reaches EOF, so probing the old-file size would be a wasted subprocess.
+	total := 0
+	if contextLines > 0 && contextLines < fullContextSentinel {
+		total = g.totalOldLines(ref, file, staged)
+	}
+	lines, err := parseUnifiedDiff(out, total)
 	if err != nil {
 		return nil, err
 	}
@@ -406,10 +430,44 @@ func (g *Git) FileDiff(ref, file string, staged bool, contextLines int) ([]DiffL
 	return lines, nil
 }
 
-// gitContextArg returns the -U argument for git diff given the caller's requested
-// context size. A non-positive contextLines or one at or above fullContextSentinel
-// returns the full-file arg; any other value returns -U<contextLines>.
-func gitContextArg(contextLines int) string {
+// totalOldLines returns the line count of the pre-change version of file, used by
+// parseUnifiedDiff to emit a trailing divider. Returns 0 when the old-side file is
+// unavailable (new files, bad refs, etc.) — the parser treats 0 as "unknown" and
+// skips the trailing divider.
+//
+// Old-side resolution:
+//   - ref empty + staged      → HEAD (git diff --cached compares HEAD against index)
+//   - ref empty + not staged  → index via `git show :path`
+//   - ref contains ".." or "..." → left operand (triple-dot checked first so A...B
+//     is not mis-split on the leading "..")
+//   - single ref              → use as-is
+//
+// For triple-dot ranges the left operand is an approximation of the true old side
+// (merge-base(A,B)); accurate enough for the informational trailing-divider count.
+func (g *Git) totalOldLines(ref, file string, staged bool) int {
+	oldRef := ref
+	if left, _, ok := strings.Cut(ref, "..."); ok {
+		oldRef = left
+	}
+	if left, _, ok := strings.Cut(oldRef, ".."); ok {
+		oldRef = left
+	}
+	if oldRef == "" && staged {
+		oldRef = "HEAD"
+	}
+	// `git show :path` (empty oldRef) shows the index version of the file
+	out, err := g.runGit("show", oldRef+":"+file)
+	if err != nil {
+		return 0
+	}
+	return countLines(out)
+}
+
+// unifiedContextArg returns the -U argument for unified-diff tools (git, hg)
+// given the caller's requested context size. A non-positive contextLines or one
+// at or above fullContextSentinel returns the full-file arg; any other value
+// returns -U<contextLines>.
+func unifiedContextArg(contextLines int) string {
 	if contextLines <= 0 || contextLines >= fullContextSentinel {
 		return fullFileContext
 	}
@@ -557,8 +615,37 @@ func (g *Git) formatSize(bytes int64) string {
 	}
 }
 
-// hunkHeaderRe matches unified diff hunk headers like @@ -1,5 +1,7 @@
-var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@`)
+// hunkHeaderRe matches unified diff hunk headers like @@ -1,5 +1,7 @@.
+// Lengths are optional per git's spec (omitted means length 1) and are captured
+// so the parser can compute the old-side end of each hunk.
+var hunkHeaderRe = regexp.MustCompile(`^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@`)
+
+// countLines returns the number of lines in s, counting a final non-newline-terminated
+// line as one additional line. Empty input returns 0. Used by the per-VCS totalOldLines
+// methods to translate file contents into a line count for the trailing divider.
+func countLines(s string) int {
+	if s == "" {
+		return 0
+	}
+	n := strings.Count(s, "\n")
+	if !strings.HasSuffix(s, "\n") {
+		n++
+	}
+	return n
+}
+
+// appendGapDivider appends a "⋯ N lines ⋯" divider to lines when gap is positive.
+// Used for leading, between-hunks, and trailing dividers — same format, different
+// source of the gap count. Returns lines unchanged when gap <= 0 (nothing to show).
+func appendGapDivider(lines []DiffLine, gap int) []DiffLine {
+	switch {
+	case gap == 1:
+		return append(lines, DiffLine{ChangeType: ChangeDivider, Content: "⋯ 1 line ⋯"})
+	case gap > 1:
+		return append(lines, DiffLine{ChangeType: ChangeDivider, Content: fmt.Sprintf("⋯ %d lines ⋯", gap)})
+	}
+	return lines
+}
 
 // binaryFilesRe matches git's "Binary files ... differ" line for binary diffs.
 // Assumes English locale; non-English git may localize this message.
@@ -568,7 +655,12 @@ var binaryFilesRe = regexp.MustCompile(`^Binary files .+ and .+ differ$`)
 // it handles the diff header, hunk headers, and content lines.
 // for binary diffs ("Binary files ... differ"), it returns a single placeholder DiffLine.
 // intended for single-file diffs; multi-file diffs are not fully supported.
-func parseUnifiedDiff(raw string) ([]DiffLine, error) {
+//
+// totalOldLines is the total line count of the pre-change file, used to emit a
+// trailing "⋯ N lines ⋯" divider after the last hunk when it does not reach EOF.
+// Pass 0 when unknown (context-only sources, tests, or any case where the caller
+// cannot cheaply determine the old file's size) — trailing divider is then skipped.
+func parseUnifiedDiff(raw string, totalOldLines int) ([]DiffLine, error) {
 	var lines []DiffLine
 	scanner := bufio.NewScanner(strings.NewReader(raw))
 	scanner.Buffer(make([]byte, 0, bufio.MaxScanTokenSize), MaxLineLength)
@@ -576,7 +668,13 @@ func parseUnifiedDiff(raw string) ([]DiffLine, error) {
 	// skip diff header lines (---, +++, diff --git, index, etc.)
 	inHeader := true
 	var oldNum, newNum int
-	firstHunk := true
+	// prevOldEnd = next untouched old-side line. Initialized to 1 so the first hunk's
+	// leading divider uses the same `oldStart - prevOldEnd` formula as between-hunks gaps.
+	prevOldEnd := 1
+	// sawHunk tracks whether any hunk header was parsed — used as the guard for the
+	// trailing divider so that insertion-at-start hunks (@@ -0,0 ...) don't collide
+	// with the prevOldEnd==1 initialization sentinel.
+	var sawHunk bool
 	var isNewFile, isDeletedFile bool
 
 	for scanner.Scan() {
@@ -608,16 +706,25 @@ func parseUnifiedDiff(raw string) ([]DiffLine, error) {
 		// parse hunk header
 		if m := hunkHeaderRe.FindStringSubmatch(line); m != nil {
 			oldStart, errOld := strconv.Atoi(m[1])
-			newStart, errNew := strconv.Atoi(m[2])
+			newStart, errNew := strconv.Atoi(m[3])
 			if errOld != nil || errNew != nil {
 				return nil, fmt.Errorf("parse hunk header %q: old=%w new=%w", line, errOld, errNew)
 			}
+			// Atoi("") returns 0 with error; regex guarantees m[2] is digits when non-empty.
+			// Both the omitted-length case (git spec: implicit 1) and the literal `,0` (insertion-only)
+			// end up at oldLen=0 here, and max(oldLen,1) below resolves both to the same advance.
+			oldLen, _ := strconv.Atoi(m[2])
 
-			// add divider between non-adjacent hunks (when using normal context, not -U1000000)
-			if !firstHunk {
-				lines = append(lines, DiffLine{ChangeType: ChangeDivider, Content: "..."})
-			}
-			firstHunk = false
+			// emit divider representing unchanged lines BEFORE this hunk.
+			// Leading divider (first hunk) uses prevOldEnd=1 initialization; between-hunks use
+			// prevOldEnd from prior iteration. Gap uses hunk-header metadata not oldNum, so
+			// insertion-only hunks (@@ -K,0 ...) compute correctly; oldNum stays put on `+` lines.
+			lines = appendGapDivider(lines, oldStart-prevOldEnd)
+			sawHunk = true
+			// prevOldEnd = line number AFTER the current hunk on the old side. Normal hunks
+			// (oldLen>0) cover [oldStart, oldStart+oldLen). Insertion-only hunks (oldLen==0,
+			// e.g. @@ -K,0 ...) insert between old lines K and K+1 — handled by max(oldLen,1).
+			prevOldEnd = oldStart + max(oldLen, 1)
 
 			oldNum = oldStart
 			newNum = newStart
@@ -661,6 +768,14 @@ func parseUnifiedDiff(raw string) ([]DiffLine, error) {
 
 	if err := scanner.Err(); err != nil {
 		return nil, fmt.Errorf("scan diff: %w", err)
+	}
+
+	// trailing divider: unchanged lines after the last hunk on the old side.
+	// Emitted only when the caller supplied totalOldLines AND at least one hunk
+	// was processed. sawHunk (not prevOldEnd > 1) is the correct "processed" flag
+	// — insertion-at-start hunks (@@ -0,0 ...) leave prevOldEnd at 1 but still count.
+	if totalOldLines > 0 && sawHunk {
+		lines = appendGapDivider(lines, totalOldLines-prevOldEnd+1)
 	}
 
 	return lines, nil

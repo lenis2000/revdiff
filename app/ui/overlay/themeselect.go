@@ -28,6 +28,7 @@ type themeSelectOverlay struct {
 	filter            string
 	lastPreviewedName string
 	height            int // last known terminal height, updated on render
+	popupWidth        int // last known popup width, updated on render; used by handleLeftClick
 }
 
 func (t *themeSelectOverlay) open(spec ThemeSelectSpec) {
@@ -70,6 +71,7 @@ func (t *themeSelectOverlay) applyFilter() {
 func (t *themeSelectOverlay) render(ctx RenderCtx, mgr *Manager) string {
 	t.height = ctx.Height
 	popupWidth := max(min(ctx.Width-themePopupMargin, themePopupMaxWidth), themePopupMinWidth)
+	t.popupWidth = popupWidth
 	maxVisible := t.maxVisible()
 
 	// clamp offset after height refresh so cursor stays visible on terminal resize
@@ -114,7 +116,7 @@ func (t *themeSelectOverlay) render(ctx RenderCtx, mgr *Manager) string {
 
 	accentFg := string(ctx.Resolver.Color(style.ColorKeyAccentFg))
 	paneBg := string(ctx.Resolver.Color(style.ColorKeyDiffPaneBg))
-	box = mgr.injectBorderTitle(box, title, popupWidth, accentFg, paneBg)
+	box = mgr.injectBorderTitle(box, title, borderEdgeText{popupWidth: popupWidth, accentFg: accentFg, paneBg: paneBg})
 
 	return box
 }
@@ -200,22 +202,13 @@ func (t *themeSelectOverlay) handleKey(msg tea.KeyMsg, action keymap.Action) Out
 		return Outcome{Kind: OutcomeNone}
 
 	case tea.KeyUp:
-		if t.cursor > 0 {
-			t.cursor--
-			if t.cursor < t.offset {
-				t.offset = t.cursor
-			}
+		if t.moveCursorBy(-1) {
 			return t.previewOutcome()
 		}
 		return Outcome{Kind: OutcomeNone}
 
 	case tea.KeyDown:
-		if t.cursor < len(t.entries)-1 {
-			t.cursor++
-			maxVis := t.maxVisible()
-			if t.cursor >= t.offset+maxVis {
-				t.offset = t.cursor - maxVis + 1
-			}
+		if t.moveCursorBy(1) {
 			return t.previewOutcome()
 		}
 		return Outcome{Kind: OutcomeNone}
@@ -228,6 +221,95 @@ func (t *themeSelectOverlay) handleKey(msg tea.KeyMsg, action keymap.Action) Out
 	default:
 		return Outcome{Kind: OutcomeNone}
 	}
+}
+
+// moveCursorBy shifts the cursor by delta (positive = down, negative = up),
+// clamped to [0, len(entries)-1]. offset follows the cursor using the same
+// window-scroll policy as keyboard navigation. returns true when the cursor
+// moved, false when it was already at the edge or the entry list is empty.
+func (t *themeSelectOverlay) moveCursorBy(delta int) bool {
+	if len(t.entries) == 0 {
+		return false
+	}
+	target := min(max(t.cursor+delta, 0), len(t.entries)-1)
+	if target == t.cursor {
+		return false
+	}
+	t.cursor = target
+	if t.cursor < t.offset {
+		t.offset = t.cursor
+	}
+	maxVis := t.maxVisible()
+	if t.cursor >= t.offset+maxVis {
+		t.offset = t.cursor - maxVis + 1
+	}
+	return true
+}
+
+// handleMouse drives the overlay in response to mouse events. wheel navigates
+// the list and returns a preview outcome so the main model can restyle the
+// background diff live. left-click inside an entry row confirms that theme
+// (same as pressing Enter). clicks on the filter row, the blank separator,
+// past the last entry, or on border/padding are no-ops so the overlay is not
+// dismissed by a stray click. coords are popup-local (Manager.HandleMouse
+// translates).
+func (t *themeSelectOverlay) handleMouse(msg tea.MouseMsg) Outcome {
+	if msg.Action != tea.MouseActionPress {
+		return Outcome{Kind: OutcomeNone}
+	}
+	switch msg.Button {
+	case tea.MouseButtonWheelDown:
+		if !t.moveCursorBy(t.wheelStep(msg.Shift)) {
+			return Outcome{Kind: OutcomeNone}
+		}
+		return t.previewOutcome()
+	case tea.MouseButtonWheelUp:
+		if !t.moveCursorBy(-t.wheelStep(msg.Shift)) {
+			return Outcome{Kind: OutcomeNone}
+		}
+		return t.previewOutcome()
+	case tea.MouseButtonLeft:
+		return t.handleLeftClick(msg.X, msg.Y)
+	default:
+		return Outcome{Kind: OutcomeNone}
+	}
+}
+
+// wheelStep returns the cursor step for a wheel notch: 1 by default,
+// half the visible page when shift is held.
+func (t *themeSelectOverlay) wheelStep(shift bool) int {
+	if !shift {
+		return 1
+	}
+	return max(t.maxVisible()/2, 1)
+}
+
+// handleLeftClick maps popup-local (x, y) to an entry row and confirms that
+// theme. layout inside the box: y=0 border, y=1 top padding, y=2 filter,
+// y=3 blank separator, y=4+ entries. horizontally: x=0 border, x=1 left
+// padding, x in [2, popupWidth-2) content, x=popupWidth-2 right padding,
+// x=popupWidth-1 right border. clicks outside the content rectangle are
+// no-ops so users cannot accidentally confirm a theme by clicking chrome.
+// lastPreviewedName is updated so a subsequent arrow-key back to the same
+// entry does not re-emit a redundant preview.
+func (t *themeSelectOverlay) handleLeftClick(localX, localY int) Outcome {
+	const entriesTop = 4      // border (1) + top padding (1) + filter (1) + blank (1)
+	const horizChromeCols = 2 // border (1) + side padding (1) on each side
+	if localX < horizChromeCols || localX >= t.popupWidth-horizChromeCols {
+		return Outcome{Kind: OutcomeNone}
+	}
+	relRow := localY - entriesTop
+	maxVis := t.maxVisible()
+	if relRow < 0 || relRow >= maxVis {
+		return Outcome{Kind: OutcomeNone}
+	}
+	entryIdx := t.offset + relRow
+	if entryIdx < 0 || entryIdx >= len(t.entries) {
+		return Outcome{Kind: OutcomeNone}
+	}
+	t.cursor = entryIdx
+	t.lastPreviewedName = t.entries[entryIdx].Name
+	return Outcome{Kind: OutcomeThemeConfirmed, ThemeChoice: &ThemeChoice{Name: t.entries[entryIdx].Name}}
 }
 
 // previewOutcome returns a theme preview outcome with dedup — if the current

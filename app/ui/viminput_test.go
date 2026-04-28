@@ -210,7 +210,7 @@ func TestYY_CopiesCurrentLine(t *testing.T) {
 	assert.True(t, handled)
 	assert.Equal(t, 1, cb.calls)
 	assert.Equal(t, "added line", cb.payload)
-	assert.Equal(t, "yanked line", m.commits.hint)
+	assert.Equal(t, "yanked line", m.vim.hint)
 	assert.Equal(t, 0, m.vim.pendingCount)
 	assert.Equal(t, "", m.vim.pendingChord)
 }
@@ -229,7 +229,7 @@ func TestYY_CountYanksMultipleLines(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, "one\ntwo\nthree", cb.payload)
-	assert.Equal(t, "yanked 3 lines", m.commits.hint)
+	assert.Equal(t, "yanked 3 lines", m.vim.hint)
 }
 
 func TestYY_CountPastEndYanksWhatsAvailable(t *testing.T) {
@@ -244,7 +244,7 @@ func TestYY_CountPastEndYanksWhatsAvailable(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, "one\ntwo", cb.payload)
-	assert.Equal(t, "yanked 2 lines", m.commits.hint)
+	assert.Equal(t, "yanked 2 lines", m.vim.hint)
 }
 
 func TestYY_SkipsDividersBinaryAndPlaceholders(t *testing.T) {
@@ -274,7 +274,7 @@ func TestYY_OnDividerOnlyIsNoOp(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, 0, cb.calls)
-	assert.Equal(t, "nothing to yank", m.commits.hint)
+	assert.Equal(t, "nothing to yank", m.vim.hint)
 }
 
 func TestYY_OnAnnotationRowIsNoOp(t *testing.T) {
@@ -288,7 +288,7 @@ func TestYY_OnAnnotationRowIsNoOp(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, 0, cb.calls)
-	assert.Empty(t, m.commits.hint, "annotation-row yank is silent")
+	assert.Empty(t, m.vim.hint, "annotation-row yank is silent")
 }
 
 func TestYY_TreePaneIsNoOp(t *testing.T) {
@@ -302,7 +302,7 @@ func TestYY_TreePaneIsNoOp(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, 0, cb.calls)
-	assert.Empty(t, m.commits.hint)
+	assert.Empty(t, m.vim.hint)
 }
 
 func TestYY_ClipboardErrorSurfacesHint(t *testing.T) {
@@ -316,7 +316,7 @@ func TestYY_ClipboardErrorSurfacesHint(t *testing.T) {
 	_, m, _ = m.consumeVimPrefix(keyMsg('y'))
 
 	assert.Equal(t, 1, cb.calls)
-	assert.Contains(t, m.commits.hint, "clipboard error")
+	assert.Contains(t, m.vim.hint, "clipboard error")
 }
 
 func TestYY_YNonY_ClearsChordAndFallsThrough(t *testing.T) {

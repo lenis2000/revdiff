@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.27.0 - 2026-04-27
+
+### New Features
+
+- --annotations flag preloads annotations from FormatOutput markdown #156 @tushkanin
+- review info popup (i) with --description and aggregate stats #155 @melonamin
+
+### Improvements
+
+- shorten style.css cache TTL to 5 minutes 8425200
+- optimize images, self-host fonts, fix CLS a663ef5
+
+### Bug Fixes
+
+- restore sticky sidebar by scoping mobile-only overflow 643aafa
+
+## v0.26.1 - 2026-04-26
+
+### New Features
+
+- vertical scrollbar thumb on navigation pane right border #152 @umputun
+
+## v0.26.0 - 2026-04-25
+
+### New Features
+
+- vertical scrollbar thumb on diff pane right border #151 @umputun
+
+### Improvements
+
+- fix canonical/sitemap mismatch and tighten meta tags 0de948e
+- teach revdiff skill to recognize single-file review args 8016864
+
+## v0.25.1 - 2026-04-24
+
+### Improvements
+
+- inline vim-motion mention in themes & keybindings card 29aa0f6
+- add Vim motions feature card to site landing page b7465f0
+
+### Bug Fixes
+
+- persist theme into Application Options section #149 @umputun
+
+## v0.25.0 - 2026-04-23
+
+### New Features
+
+- vim-motion preset (--vim-motion, off by default) #147 @umputun
+- line-count labels on compact-mode dividers (⋯ N lines ⋯) #146 @umputun
+
+### Bug Fixes
+
+- avoid silent death and destructive fallback in cmux launcher a978f21
+
+## v0.24.0 - 2026-04-23
+
+### New Features
+
+- leader-based chord keybindings (kitty-style ctrl+w>x) #143 @umputun
+- mouse wheel and click support in overlay popups #144 @umputun
+
+## v0.23.0 - 2026-04-22
+
+### New Features
+
+- add mouse support (scroll-wheel and left-click for pane and file selection) #142 @umputun
+
 ## v0.22.0 - 2026-04-21
 
 ### New Features

@@ -51,6 +51,7 @@ func (m *Model) newAnnotationInput(placeholder string, prefixWidth int) (textinp
 
 // startAnnotation enters annotation input mode for the current cursor line.
 func (m *Model) startAnnotation() tea.Cmd {
+	m.clearPendingInputState()
 	dl, ok := m.cursorDiffLine()
 	if !ok || dl.ChangeType == diff.ChangeDivider {
 		return nil
@@ -121,6 +122,7 @@ func (m *Model) ensureLineAnnotationInputVisible() {
 
 // startFileAnnotation enters annotation input mode for a file-level annotation (Line=0).
 func (m *Model) startFileAnnotation() tea.Cmd {
+	m.clearPendingInputState()
 	if m.file.name == "" {
 		return nil
 	}
@@ -490,6 +492,91 @@ func (m Model) cursorVisualRange() (top, bottom int) {
 	top = m.cursorViewportYUsing(hunks, annotationSet)
 	h := max(m.cursorVisualHeight(hunks, annotationSet), 1)
 	return top, top + h - 1
+}
+
+// rowOnAnnotationSubLine reports whether relRow (0-based, relative to the first
+// visual row of the diff line at idx) targets the injected annotation sub-line
+// below that diff line. h is the total visual height of the diff line (wrap rows
+// plus any injected annotation rows). delete-only placeholders always return
+// false because renderCollapsedDiff skips annotation rendering for them, even
+// when the underlying removed line has an annotation.
+func (m Model) rowOnAnnotationSubLine(idx, relRow, h int, hunks []int, annSet map[string]bool) bool {
+	if m.isDeleteOnlyPlaceholder(idx, hunks) {
+		return false
+	}
+	dl := m.file.lines[idx]
+	if dl.ChangeType == diff.ChangeDivider {
+		return false
+	}
+	key := m.annotationKey(m.diffLineNum(dl), string(dl.ChangeType))
+	if !annSet[key] {
+		return false
+	}
+	annRows := m.wrappedAnnotationLineCount(key)
+	return annRows > 0 && relRow >= h-annRows
+}
+
+// visualRowToDiffLine maps a visual row within the diff viewport content back
+// to a diff-line index. row is 0-based relative to the first visible content
+// row of the viewport (caller must add YOffset and subtract any header rows).
+// when the file has a file-level annotation, rows covered by that annotation
+// map to idx=-1. the onAnnotation return value mirrors the semantics of
+// m.annot.cursorOnAnnotation: true when the row falls on an injected
+// annotation sub-line rather than the diff line (or its wrap-continuation)
+// itself. this is the inverse of cursorVisualRange + cursorViewportYUsing.
+//
+// edge cases: empty m.file.lines returns (m.nav.diffCursor, false); row < 0
+// returns (-1, false) when a file-level annotation is present, else
+// (firstVisibleIdx, false); rows past the last line return the last valid
+// index.
+func (m Model) visualRowToDiffLine(row int) (idx int, onAnnotation bool) {
+	if len(m.file.lines) == 0 {
+		if m.hasFileAnnotation() && row >= 0 && row < m.wrappedAnnotationLineCount(annotKeyFile) {
+			return -1, false
+		}
+		return m.nav.diffCursor, false
+	}
+
+	var hunks []int
+	if m.modes.collapsed.enabled {
+		hunks = m.findHunks()
+	}
+	annSet := m.buildAnnotationSet()
+
+	running := 0
+	if m.hasFileAnnotation() {
+		fileRows := m.wrappedAnnotationLineCount(annotKeyFile)
+		if row < fileRows {
+			return -1, false
+		}
+		running = fileRows
+	} else if row < 0 {
+		// no file annotation, row above the top: pick the first visible line
+		for i := range m.file.lines {
+			if m.hunkLineHeight(i, hunks, annSet) > 0 {
+				return i, false
+			}
+		}
+		return 0, false
+	}
+
+	for i := range m.file.lines {
+		h := m.hunkLineHeight(i, hunks, annSet)
+		if h == 0 {
+			continue
+		}
+		if row < running+h {
+			return i, m.rowOnAnnotationSubLine(i, row-running, h, hunks, annSet)
+		}
+		running += h
+	}
+	// row past the last visible line: return the last visible line index
+	for i := len(m.file.lines) - 1; i >= 0; i-- {
+		if m.hunkLineHeight(i, hunks, annSet) > 0 {
+			return i, false
+		}
+	}
+	return len(m.file.lines) - 1, false
 }
 
 // cursorVisualHeight returns the number of visual rows occupied by the cursor.

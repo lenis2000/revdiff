@@ -3,6 +3,7 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/mattn/go-runewidth"
@@ -28,35 +29,46 @@ func (m Model) View() string {
 
 	ph := m.paneHeight()
 
+	// determine diff pane inner width up front so the header can be truncated
+	// to a single visual row before lipgloss renders. without truncation, a
+	// long filename causes lipgloss to soft-wrap the header onto multiple
+	// rows, which would push viewport rows past applyScrollbar's hardcoded
+	// diffScrollbarFirstViewportRow offset.
+	var diffPaneW int
+	if m.treePaneHidden() {
+		diffPaneW = m.layout.width - 2
+	} else {
+		diffPaneW = m.layout.width - m.layout.treeWidth - 4
+	}
+
 	// diff pane title
 	diffTitle := "no file selected"
 	if m.file.name != "" {
 		diffTitle = m.file.name
 	}
-	diffHeader := m.resolver.Style(style.StyleKeyDirEntry).Render(" " + diffTitle)
+	diffHeader := m.resolver.Style(style.StyleKeyDirEntry).Render(m.truncateHeaderTitle(diffTitle, diffPaneW))
 	diffContent := lipgloss.JoinVertical(lipgloss.Left, diffHeader, m.layout.viewport.View())
 
 	var mainView string
 	switch {
 	case m.treePaneHidden():
 		// tree pane hidden (user toggle or single-file without TOC): diff uses full width
-		paneW := m.layout.width - 2
-		diffContent = m.padContentBg(diffContent, paneW, m.resolver.Color(style.ColorKeyDiffPaneBg))
+		diffContent = m.padContentBg(diffContent, diffPaneW, m.resolver.Color(style.ColorKeyDiffPaneBg))
 		diffPane := m.resolver.Style(style.StyleKeyDiffPaneActive).
-			Width(paneW).
+			Width(diffPaneW).
 			Height(ph).
 			Render(diffContent)
-		mainView = diffPane
+		mainView = m.applyScrollbar(diffPane)
 
 	case m.file.singleFile && m.file.mdTOC != nil:
 		// single-file markdown with TOC: two-pane layout with TOC in left pane
 		tocContent := m.file.mdTOC.Render(sidepane.TOCRender{Width: m.layout.treeWidth, Height: ph, Focused: m.layout.focus == paneTree, Resolver: m.resolver})
-		mainView = m.renderTwoPaneLayout(tocContent, diffContent, ph)
+		mainView = m.renderTwoPaneLayout(tocContent, diffContent, m.file.mdTOC.ScrollState(), ph, diffPaneW)
 
 	default:
 		annotated := m.annotatedFiles()
 		treeContent := m.tree.Render(sidepane.FileTreeRender{Width: m.layout.treeWidth, Height: ph, Annotated: annotated, Resolver: m.resolver, Renderer: m.renderer})
-		mainView = m.renderTwoPaneLayout(treeContent, diffContent, ph)
+		mainView = m.renderTwoPaneLayout(treeContent, diffContent, m.tree.ScrollState(), ph, diffPaneW)
 	}
 
 	mainView = m.overlay.Compose(mainView, overlay.RenderCtx{Width: m.layout.width, Height: m.layout.height, Resolver: m.resolver})
@@ -70,8 +82,11 @@ func (m Model) View() string {
 }
 
 // renderTwoPaneLayout renders a two-pane layout with left (tree/TOC) and right (diff) content.
-// applies focus-based pane styles, background padding, and joins horizontally.
-func (m Model) renderTwoPaneLayout(leftContent, diffContent string, ph int) string {
+// applies focus-based pane styles, background padding, scrollbars, and joins horizontally.
+// diffPaneW is the inner width caller passed to truncateHeaderTitle and must
+// match the lipgloss Width() applied here — single source of truth for the
+// scrollbar's single-line-header invariant.
+func (m Model) renderTwoPaneLayout(leftContent, diffContent string, leftScroll sidepane.ScrollState, ph, diffPaneW int) string {
 	treeStyle := m.resolver.Style(style.StyleKeyTreePane)
 	diffStyle := m.resolver.Style(style.StyleKeyDiffPane)
 	if m.layout.focus == paneTree {
@@ -80,34 +95,120 @@ func (m Model) renderTwoPaneLayout(leftContent, diffContent string, ph int) stri
 		diffStyle = m.resolver.Style(style.StyleKeyDiffPaneActive)
 	}
 
-	diffW := m.layout.width - m.layout.treeWidth - 4
 	leftContent = m.padContentBg(leftContent, m.layout.treeWidth, m.resolver.Color(style.ColorKeyTreePaneBg))
-	diffContent = m.padContentBg(diffContent, diffW, m.resolver.Color(style.ColorKeyDiffPaneBg))
+	diffContent = m.padContentBg(diffContent, diffPaneW, m.resolver.Color(style.ColorKeyDiffPaneBg))
 
 	leftPane := treeStyle.
 		Width(m.layout.treeWidth).
 		Height(ph).
 		Render(leftContent)
+	leftPane = m.applyNavigationScrollbar(leftPane, leftScroll)
 
 	diffPane := diffStyle.
-		Width(diffW).
+		Width(diffPaneW).
 		Height(ph).
 		Render(diffContent)
+	diffPane = m.applyScrollbar(diffPane)
 
 	return lipgloss.JoinHorizontal(lipgloss.Top, leftPane, diffPane)
 }
 
+// sanitizeFilenameForDisplay strips characters that would break or spoof
+// header/status-bar layout: C0 controls (< 0x20), DEL (0x7F), C1 controls
+// (0x80–0x9F), the Unicode replacement character (U+FFFD), and Unicode
+// format/bidi controls (RTL/LTR overrides U+202A–U+202E, isolates
+// U+2066–U+2069, ZWJ/ZWNJ U+200D/U+200C, ZWSP U+200B, BOM U+FEFF).
+// POSIX permits the C0/C1 bytes in paths; ingesting them raw lets crafted
+// paths re-wrap the diff header (and re-break the scrollbar's single-line
+// invariant) or inject terminal escape sequences. The bidi/format strip
+// is a defense-in-depth measure against filename spoofing — the chars
+// are zero-width so they do not affect width math, but they can make a
+// path render as something the user did not actually approve.
+func (m Model) sanitizeFilenameForDisplay(s string) string {
+	return strings.Map(func(r rune) rune {
+		switch {
+		case r < 0x20, r == 0x7F, r >= 0x80 && r <= 0x9F:
+			return -1
+		case r == utf8.RuneError:
+			return -1
+		case r >= 0x200B && r <= 0x200F: // ZWSP, ZWNJ, ZWJ, LRM, RLM
+			return -1
+		case r >= 0x202A && r <= 0x202E: // bidi overrides + embeddings
+			return -1
+		case r >= 0x2066 && r <= 0x2069: // bidi isolates
+			return -1
+		case r == 0xFEFF: // BOM / ZWNBSP
+			return -1
+		}
+		return r
+	}, s)
+}
+
+// truncateLeftToWidth left-truncates s with a leading "…" so it fits in
+// budget visual columns, preserving the meaningful end. returns s unchanged
+// when it already fits, "" when budget <= 0, "…" when budget == 1.
+func (m Model) truncateLeftToWidth(s string, budget int) string {
+	if lipgloss.Width(s) <= budget {
+		return s
+	}
+	if budget <= 0 {
+		return ""
+	}
+	if budget == 1 {
+		return "…"
+	}
+	tailBudget := budget - 1 // 1 cell for the leading "…"
+	runes := []rune(s)
+	w, cutIdx := 0, len(runes)
+	for i := len(runes) - 1; i >= 0; i-- {
+		rw := runewidth.RuneWidth(runes[i])
+		if w+rw > tailBudget {
+			break
+		}
+		w += rw
+		cutIdx = i
+	}
+	return "…" + string(runes[cutIdx:])
+}
+
+// truncateHeaderTitle returns the diff pane header text shortened to fit
+// in exactly one visual row of width paneW, prefixed with the leading
+// single-cell space the header always renders with. control characters
+// (newline, ESC, etc.) are stripped first so crafted filenames cannot
+// re-wrap the header. left-truncation keeps the meaningful end of long
+// paths. extreme-narrow paneW values (≤ 1) delegate to truncateLeftToWidth
+// without the leading space; these are not produced by any realistic
+// terminal layout but the helper must not overflow.
+func (m Model) truncateHeaderTitle(title string, paneW int) string {
+	clean := m.sanitizeFilenameForDisplay(title)
+	full := " " + clean
+	if lipgloss.Width(full) <= paneW {
+		return full
+	}
+	if paneW <= 1 {
+		return m.truncateLeftToWidth(clean, paneW)
+	}
+	// paneW >= 2: " " + truncateLeftToWidth(clean, paneW-1) fits in paneW
+	return " " + m.truncateLeftToWidth(clean, paneW-1)
+}
+
 // transientHint returns the first non-empty transient status-bar hint. hints
 // are cleared on the next key press (see handleKey). priority matches the
-// display order: commits > reload > compact. returns "" when no hint is set.
+// display order: reload > compact > keys > vim. returns "" when no hint is
+// set. chord (keys) hints and vim-motion hints are lowest priority — an
+// in-flight reload or a compact-mode toggle wins, since those hints are
+// user-driven and recoverable. vim hints sit below keys since vim-motion
+// feedback is the most recoverable of the group.
 func (m Model) transientHint() string {
 	switch {
-	case m.commits.hint != "":
-		return m.commits.hint
 	case m.reload.hint != "":
 		return m.reload.hint
 	case m.compact.hint != "":
 		return m.compact.hint
+	case m.keys.hint != "":
+		return m.keys.hint
+	case m.vim.hint != "":
+		return m.vim.hint
 	}
 	return ""
 }
@@ -135,9 +236,12 @@ func (m Model) statusBarText() string {
 	// build left-side segments
 	var segments []string
 
-	// filename and diff stats segments
-	if m.file.name != "" {
-		segments = append(segments, m.file.name, m.fileStatsText())
+	// filename and diff stats segments. sanitize the filename so crafted
+	// paths (newline/ESC/bidi controls) cannot break or spoof status-bar
+	// layout — same defense-in-depth applied to the diff header.
+	cleanName := m.sanitizeFilenameForDisplay(m.file.name)
+	if cleanName != "" {
+		segments = append(segments, cleanName, m.fileStatsText())
 	}
 
 	// hunk position (always shown in diff pane when there are hunks)
@@ -193,27 +297,12 @@ func (m Model) statusBarText() string {
 		segments = m.statusSegmentsMinimal()
 		left = strings.Join(segments, sep)
 	}
-	if lipgloss.Width(left) > available && m.file.name != "" {
-		// truncate filename from left, keeping end of path.
-		// uses display-width measurement to handle wide characters (CJK, emoji)
+	if lipgloss.Width(left) > available && cleanName != "" {
+		// truncate filename from left, keeping end of path. uses display-width
+		// measurement to handle wide characters (CJK, emoji)
 		statsStr := m.fileStatsText()
 		nameMax := max(available-lipgloss.Width(statsStr)-lipgloss.Width(sep), 4) // reserve separator between name and stats
-		name := m.file.name
-		if lipgloss.Width(name) > nameMax {
-			budget := nameMax - 1 // reserve 1 cell for "…"
-			runes := []rune(name)
-			w, cutIdx := 0, len(runes)
-			for i := len(runes) - 1; i >= 0; i-- {
-				rw := runewidth.RuneWidth(runes[i])
-				if w+rw > budget {
-					break
-				}
-				w += rw
-				cutIdx = i
-			}
-			name = "…" + string(runes[cutIdx:])
-		}
-		left = name + sep + statsStr
+		left = m.truncateLeftToWidth(cleanName, nameMax) + sep + statsStr
 	}
 
 	return m.joinStatusSections(left, right, sep)
@@ -377,8 +466,8 @@ func (m Model) statusModeIcons() string {
 // statusSegmentsNoSearch returns left segments without search position (for narrow terminals).
 func (m Model) statusSegmentsNoSearch() []string {
 	var segments []string
-	if m.file.name != "" {
-		segments = append(segments, m.file.name, m.fileStatsText())
+	if name := m.sanitizeFilenameForDisplay(m.file.name); name != "" {
+		segments = append(segments, name, m.fileStatsText())
 	}
 	if hs := m.hunkSegment(); hs != "" {
 		segments = append(segments, hs)
@@ -392,8 +481,8 @@ func (m Model) statusSegmentsNoSearch() []string {
 // statusSegmentsMinimal returns left segments with only filename and stats.
 func (m Model) statusSegmentsMinimal() []string {
 	var segments []string
-	if m.file.name != "" {
-		segments = append(segments, m.file.name, m.fileStatsText())
+	if name := m.sanitizeFilenameForDisplay(m.file.name); name != "" {
+		segments = append(segments, name, m.fileStatsText())
 	}
 	return segments
 }

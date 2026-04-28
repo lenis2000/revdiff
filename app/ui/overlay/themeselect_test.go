@@ -292,6 +292,249 @@ func TestThemeSelectOverlay_HandleKey_ActionThemeSelectCancels(t *testing.T) {
 	assert.False(t, mgr.Active())
 }
 
+func TestThemeSelectOverlay_HandleMouse_WheelMovesCursor(t *testing.T) {
+	t.Run("wheel down previews next theme", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr) // ensure height is set for maxVisible
+		require.Equal(t, 0, mgr.themeSel.cursor)
+
+		out := mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+		assert.Equal(t, OutcomeThemePreview, out.Kind)
+		require.NotNil(t, out.ThemeChoice)
+		assert.Equal(t, "catppuccin-mocha", out.ThemeChoice.Name)
+		assert.Equal(t, 1, mgr.themeSel.cursor)
+		assert.True(t, mgr.Active())
+	})
+
+	t.Run("wheel up previews previous theme", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.themeSel.cursor = 2
+		mgr.themeSel.lastPreviewedName = "dracula"
+
+		out := mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelUp, Action: tea.MouseActionPress})
+		assert.Equal(t, OutcomeThemePreview, out.Kind)
+		require.NotNil(t, out.ThemeChoice)
+		assert.Equal(t, "catppuccin-mocha", out.ThemeChoice.Name)
+		assert.Equal(t, 1, mgr.themeSel.cursor)
+	})
+
+	t.Run("wheel at last entry is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.themeSel.cursor = len(themeItems()) - 1
+
+		out := mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+		assert.Equal(t, OutcomeNone, out.Kind)
+		assert.Equal(t, len(themeItems())-1, mgr.themeSel.cursor)
+	})
+
+	t.Run("shift+wheel uses half-page step", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		start := mgr.themeSel.cursor
+		mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress, Shift: true})
+		step := max(mgr.themeSel.maxVisible()/2, 1)
+		want := min(start+step, len(mgr.themeSel.entries)-1)
+		assert.Equal(t, want, mgr.themeSel.cursor)
+	})
+
+	t.Run("non-press wheel ignored", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionRelease})
+		assert.Equal(t, 0, mgr.themeSel.cursor)
+	})
+
+	t.Run("non-wheel button ignored", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress})
+		assert.Equal(t, 0, mgr.themeSel.cursor)
+	})
+}
+
+func TestThemeSelectOverlay_HandleLeftClick(t *testing.T) {
+	t.Run("click on first entry confirms it", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		// entries start at localY=4 (border + padding + filter + blank)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 4})
+		assert.Equal(t, OutcomeThemeConfirmed, out.Kind)
+		require.NotNil(t, out.ThemeChoice)
+		assert.Equal(t, "revdiff", out.ThemeChoice.Name)
+		assert.Equal(t, 0, mgr.themeSel.cursor)
+	})
+
+	t.Run("click on third entry confirms it", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 6})
+		assert.Equal(t, OutcomeThemeConfirmed, out.Kind)
+		assert.Equal(t, "dracula", out.ThemeChoice.Name)
+		assert.Equal(t, 2, mgr.themeSel.cursor)
+	})
+
+	t.Run("click on filter row is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 2})
+		assert.Equal(t, OutcomeNone, out.Kind)
+	})
+
+	t.Run("click on blank separator row is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 3})
+		assert.Equal(t, OutcomeNone, out.Kind)
+	})
+
+	t.Run("click on top border is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 0})
+		assert.Equal(t, OutcomeNone, out.Kind)
+	})
+
+	t.Run("click past visible entries is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		farRow := 4 + len(themeItems()) + 5
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: farRow})
+		assert.Equal(t, OutcomeNone, out.Kind)
+	})
+
+	t.Run("click respects scroll offset", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.themeSel.offset = 1
+
+		// click on first visible row (localY=4) selects entry at offset
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 4})
+		assert.Equal(t, OutcomeThemeConfirmed, out.Kind)
+		assert.Equal(t, "catppuccin-mocha", out.ThemeChoice.Name)
+	})
+
+	t.Run("non-press action is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease, X: 5, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind)
+	})
+
+	t.Run("click on left border column is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 0, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind, "x=0 is the left border")
+	})
+
+	t.Run("click on left padding column is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 1, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind, "x=1 is the left padding")
+	})
+
+	t.Run("click on right padding column is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		w := mgr.themeSel.popupWidth
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: w - 2, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind, "x=popupWidth-2 is the right padding")
+	})
+
+	t.Run("click on right border column is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		w := mgr.themeSel.popupWidth
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: w - 1, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind, "x=popupWidth-1 is the right border")
+	})
+
+	t.Run("click at first content column (x=2) confirms", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 2, Y: 4})
+		assert.Equal(t, OutcomeThemeConfirmed, out.Kind, "x=2 is the first content column")
+	})
+
+	t.Run("click updates lastPreviewedName to confirmed theme", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 6})
+		require.Equal(t, OutcomeThemeConfirmed, out.Kind)
+		assert.Equal(t, "dracula", mgr.themeSel.lastPreviewedName, "so a subsequent arrow-key back to the same entry does not emit redundant preview")
+	})
+
+	t.Run("click with empty entries (filter rejects all) is no-op", func(t *testing.T) {
+		mgr := NewManager()
+		mgr.OpenThemeSelect(themeSpec())
+		_ = mgr.themeSel.render(themeRenderCtx(), mgr)
+		mgr.themeSel.filter = "no-match-xyz"
+		mgr.themeSel.applyFilter()
+		require.Empty(t, mgr.themeSel.entries)
+
+		out := mgr.themeSel.handleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 5, Y: 4})
+		assert.Equal(t, OutcomeNone, out.Kind, "no entries to confirm, guard must protect against index panic")
+	})
+}
+
+func TestThemeSelectOverlay_HandleMouse_ClickOutsideSwallowed(t *testing.T) {
+	mgr := NewManager()
+	mgr.OpenThemeSelect(themeSpec())
+
+	ctx := themeRenderCtx()
+	base := makeBase(ctx.Width, ctx.Height)
+	_ = mgr.Compose(base, ctx)
+
+	require.NotZero(t, mgr.bounds.w)
+
+	out := mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonLeft, Action: tea.MouseActionPress, X: 0, Y: 0})
+	assert.Equal(t, OutcomeNone, out.Kind)
+	assert.True(t, mgr.Active(), "click outside popup must not close or confirm")
+}
+
+func TestThemeSelectOverlay_HandleMouse_ClickInsideConfirms(t *testing.T) {
+	mgr := NewManager()
+	mgr.OpenThemeSelect(themeSpec())
+
+	ctx := themeRenderCtx()
+	base := makeBase(ctx.Width, ctx.Height)
+	_ = mgr.Compose(base, ctx)
+
+	// click on first entry row: screen Y = bounds.y + 4
+	out := mgr.HandleMouse(tea.MouseMsg{
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+		X:      mgr.bounds.x + 5,
+		Y:      mgr.bounds.y + 4,
+	})
+	assert.Equal(t, OutcomeThemeConfirmed, out.Kind)
+	require.NotNil(t, out.ThemeChoice)
+	assert.False(t, mgr.Active(), "OutcomeThemeConfirmed auto-closes the overlay")
+}
+
 func TestThemeSelectOverlay_HandleKey_PreviewDedup(t *testing.T) {
 	mgr := NewManager()
 	mgr.OpenThemeSelect(themeSpec())

@@ -23,6 +23,7 @@ type options struct {
 	NoColors         bool     `long:"no-colors" ini-name:"no-colors" env:"REVDIFF_NO_COLORS" description:"disable all colors including syntax highlighting"`
 	NoStatusBar      bool     `long:"no-status-bar" ini-name:"no-status-bar" env:"REVDIFF_NO_STATUS_BAR" description:"hide the status bar"`
 	NoConfirmDiscard bool     `long:"no-confirm-discard" ini-name:"no-confirm-discard" env:"REVDIFF_NO_CONFIRM_DISCARD" description:"skip confirmation prompt when discarding annotations with Q"`
+	NoMouse          bool     `long:"no-mouse" ini-name:"no-mouse" env:"REVDIFF_NO_MOUSE" description:"disable mouse support (scroll wheel, click)"`
 	Wrap             bool     `long:"wrap" ini-name:"wrap" env:"REVDIFF_WRAP" description:"enable line wrapping in diff view"`
 	Collapsed        bool     `long:"collapsed" ini-name:"collapsed" env:"REVDIFF_COLLAPSED" description:"start in collapsed diff mode"`
 	Compact          bool     `long:"compact" ini-name:"compact" env:"REVDIFF_COMPACT" description:"start in compact diff mode (small context around changes)"`
@@ -35,6 +36,9 @@ type options struct {
 	AllFiles         bool     `long:"all-files" short:"A" no-ini:"true" description:"browse all tracked files, not just diffs (git and jj only)"`
 	Stdin            bool     `long:"stdin" no-ini:"true" description:"review stdin as a scratch buffer"`
 	StdinName        string   `long:"stdin-name" no-ini:"true" description:"synthetic file name for stdin content"`
+	Annotations      string   `long:"annotations" no-ini:"true" description:"preload annotations from a markdown file written by -o (round-trip)"`
+	Description      string   `long:"description" no-ini:"true" description:"prose context shown in the info popup (markdown; use shell multiline quoting or --description-file for multiple lines)"`
+	DescriptionFile  string   `long:"description-file" no-ini:"true" description:"read the info-popup description from this file (markdown)"`
 	Exclude          []string `long:"exclude" short:"X" ini-name:"exclude" env:"REVDIFF_EXCLUDE" env-delim:"," description:"exclude files matching prefix (may be repeated)"`
 	Include          []string `long:"include" short:"I" ini-name:"include" env:"REVDIFF_INCLUDE" env-delim:"," description:"include only files matching prefix (may be repeated)"`
 	Only             []string `long:"only" short:"F" no-ini:"true" description:"show only these files (may be repeated)"`
@@ -129,6 +133,10 @@ func parseArgs(args []string) (options, error) {
 
 	if opts.CompactContext <= 0 {
 		return options{}, errors.New("--compact-context must be >= 1")
+	}
+
+	if opts.Description != "" && opts.DescriptionFile != "" {
+		return options{}, errors.New("--description and --description-file are mutually exclusive")
 	}
 
 	if err := validateStdinFlags(opts); err != nil {

@@ -6,8 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 
+	"github.com/jessevdk/go-flags"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -602,7 +604,7 @@ func TestPatchConfigTheme_existingKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	require.NoError(t, os.WriteFile(path, []byte("wrap = true\ntheme = dracula\nblame = false\n"), 0o600))
 
-	require.NoError(t, patchConfigTheme(path, "nord"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -616,7 +618,7 @@ func TestPatchConfigTheme_noExistingKey(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	require.NoError(t, os.WriteFile(path, []byte("wrap = true\nblame = false\n"), 0o600))
 
-	require.NoError(t, patchConfigTheme(path, "nord"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -627,7 +629,7 @@ func TestPatchConfigTheme_noExistingKey(t *testing.T) {
 func TestPatchConfigTheme_createsFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 
-	require.NoError(t, patchConfigTheme(path, "dracula"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("dracula"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -637,7 +639,7 @@ func TestPatchConfigTheme_createsFile(t *testing.T) {
 func TestPatchConfigTheme_createsParentDir(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing", "config")
 
-	require.NoError(t, patchConfigTheme(path, "dracula"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("dracula"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -648,7 +650,7 @@ func TestPatchConfigTheme_skipsCommentedOut(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	require.NoError(t, os.WriteFile(path, []byte("# theme = dracula\nwrap = true\n"), 0o600))
 
-	require.NoError(t, patchConfigTheme(path, "nord"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -660,7 +662,7 @@ func TestPatchConfigTheme_semicolonComment(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "config")
 	require.NoError(t, os.WriteFile(path, []byte("; theme = dracula\n"), 0o600))
 
-	require.NoError(t, patchConfigTheme(path, "nord"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
@@ -679,7 +681,7 @@ func TestPatchConfigTheme_rejectsNewlines(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := patchConfigTheme(path, tc.themeName)
+			err := (&themeCatalog{configPath: path}).patchConfigTheme(tc.themeName)
 			require.Error(t, err)
 			assert.Contains(t, err.Error(), "must not contain newlines")
 		})
@@ -691,11 +693,170 @@ func TestPatchConfigTheme_preservesFormatting(t *testing.T) {
 	content := "wrap = true\n\n# Colors\ncolor-accent = #ff0000\ntheme = old\n\n"
 	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
 
-	require.NoError(t, patchConfigTheme(path, "new"))
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("new"))
 
 	data, err := os.ReadFile(path) //nolint:gosec // test
 	require.NoError(t, err)
 	assert.Contains(t, string(data), "theme = new")
 	assert.Contains(t, string(data), "# Colors")
 	assert.Contains(t, string(data), "color-accent = #ff0000")
+}
+
+// reproduces issue #148: appending theme = ... after a trailing [color options] section
+// must land inside [Application Options], not inside [color options].
+func TestPatchConfigTheme_insertsBeforeNamedSection(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+	}{
+		{
+			name:    "application options then color options",
+			content: "[Application Options]\nwrap = true\ncompact = true\n\n[color options]\n;color-word-add-bg = #1a8f00\n",
+		},
+		{
+			name:    "only color options section",
+			content: "[color options]\n;color-word-add-bg = #1a8f00\n",
+		},
+		{
+			name:    "application options with trailing blank lines before named section",
+			content: "[Application Options]\nwrap = true\n\n\n[color options]\n",
+		},
+		{
+			name:    "case-insensitive application options header",
+			content: "[application options]\nwrap = true\n\n[color options]\n",
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			path := filepath.Join(t.TempDir(), "config")
+			require.NoError(t, os.WriteFile(path, []byte(tc.content), 0o600))
+
+			require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
+
+			data, err := os.ReadFile(path) //nolint:gosec // test
+			require.NoError(t, err)
+			result := string(data)
+
+			themeIdx := strings.Index(result, "theme = nord")
+			colorIdx := strings.Index(result, "[color options]")
+			require.NotEqual(t, -1, themeIdx, "theme = nord must be present: %q", result)
+			require.NotEqual(t, -1, colorIdx, "[color options] header must be preserved: %q", result)
+			assert.Less(t, themeIdx, colorIdx, "theme = nord must precede [color options], got: %q", result)
+		})
+	}
+}
+
+// when file already has [Application Options] but no other named sections,
+// appending at EOF is correct (stays inside [Application Options]).
+func TestPatchConfigTheme_appendsInsideApplicationOptions(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	content := "[Application Options]\nwrap = true\ncompact = true\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
+
+	data, err := os.ReadFile(path) //nolint:gosec // test
+	require.NoError(t, err)
+	result := string(data)
+	assert.Contains(t, result, "[Application Options]")
+	assert.Contains(t, result, "theme = nord")
+	// theme line must be after the [Application Options] header
+	assert.Less(t, strings.Index(result, "[Application Options]"), strings.Index(result, "theme = nord"))
+	// existing keys must be preserved
+	assert.Contains(t, result, "wrap = true")
+	assert.Contains(t, result, "compact = true")
+}
+
+// reproduces the upgrade path from issue #148: a config already corrupted by
+// the pre-fix persist (theme = X sitting inside a trailing named section) must
+// be healed, not just replaced in place.
+func TestPatchConfigTheme_healsMisplacedThemeLine(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	content := "[Application Options]\nwrap = true\n\n[color options]\n;color-word-add-bg = #1a8f00\ntheme = dracula\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
+
+	data, err := os.ReadFile(path) //nolint:gosec // test
+	require.NoError(t, err)
+	result := string(data)
+
+	themeIdx := strings.Index(result, "theme = nord")
+	colorIdx := strings.Index(result, "[color options]")
+	require.NotEqual(t, -1, themeIdx, "new theme line must be present: %q", result)
+	require.NotEqual(t, -1, colorIdx, "[color options] header must be preserved: %q", result)
+	assert.Less(t, themeIdx, colorIdx, "theme = nord must precede [color options]: %q", result)
+	assert.NotContains(t, result, "theme = dracula", "stale theme line must be removed: %q", result)
+	assert.Contains(t, result, "wrap = true")
+	assert.Contains(t, result, ";color-word-add-bg = #1a8f00")
+}
+
+// reproduces the hand-repair duplicate scenario flagged in post-merge review:
+// a user whose config was originally corrupted (theme = X in [color options])
+// adds a correct theme = Y in [Application Options] manually without deleting
+// the stray. the next patch must update the default line AND remove the stray,
+// otherwise go-flags keeps erroring on "unknown option: theme".
+func TestPatchConfigTheme_removesStrayDuplicates(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "config")
+	content := "[Application Options]\nwrap = true\ntheme = dracula\n\n[color options]\ntheme = solarized-dark\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+
+	require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
+
+	opts, parseErr := parsePatchedConfig(t, path)
+	require.NoError(t, parseErr, "patched file must parse without go-flags error even with prior duplicates")
+	assert.Equal(t, "nord", opts.Theme)
+
+	data, err := os.ReadFile(path) //nolint:gosec // test
+	require.NoError(t, err)
+	result := string(data)
+	assert.NotContains(t, result, "theme = dracula", "original default-scope value must be replaced")
+	assert.NotContains(t, result, "theme = solarized-dark", "stray line inside [color options] must be removed")
+	assert.Contains(t, result, "wrap = true")
+	// exactly one theme line must remain
+	assert.Equal(t, 1, strings.Count(result, "\ntheme = "), "exactly one theme entry must remain: %q", result)
+}
+
+// parsePatchedConfig parses a patched INI file through go-flags the same way the
+// production code does (see loadConfigFile in config.go), so tests can assert the
+// patched file not only looks right textually but actually resolves opts.Theme
+// with no "unknown option" warning from go-flags.
+func parsePatchedConfig(t *testing.T, path string) (options, error) {
+	t.Helper()
+	var opts options
+	p := flags.NewParser(&opts, flags.Default)
+	iniParser := flags.NewIniParser(p)
+	if err := iniParser.ParseFile(path); err != nil {
+		return opts, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return opts, nil
+}
+
+// testdata fixtures round-trip through patchConfigTheme + flags.NewIniParser.
+// this is the assertion that would have caught issue #148 in the first place.
+func TestPatchConfigTheme_testdataRoundTrip(t *testing.T) {
+	tests := []struct {
+		name    string
+		fixture string // path under app/testdata/themes/
+	}{
+		{name: "good config (theme already in [Application Options])", fixture: "good.ini"},
+		{name: "no theme line, trailing [color options]", fixture: "no_theme.ini"},
+		{name: "corrupted config (theme inside [color options])", fixture: "corrupted.ini"},
+		{name: "duplicate (one valid, one stray in [color options])", fixture: "duplicate.ini"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			raw, err := os.ReadFile(filepath.Join("testdata", "themes", tc.fixture))
+			require.NoError(t, err)
+
+			path := filepath.Join(t.TempDir(), "config")
+			require.NoError(t, os.WriteFile(path, raw, 0o600)) //nolint:gosec // test fixture roundtrip
+
+			require.NoError(t, (&themeCatalog{configPath: path}).patchConfigTheme("nord"))
+
+			opts, parseErr := parsePatchedConfig(t, path)
+			require.NoError(t, parseErr, "patched file must parse without go-flags error (this is the #148 invariant)")
+			assert.Equal(t, "nord", opts.Theme, "Theme must be populated from the default section after patch")
+		})
+	}
 }

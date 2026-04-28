@@ -10,12 +10,32 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/umputun/revdiff/app/keymap"
+	"github.com/umputun/revdiff/app/ui/style"
 )
 
 func TestNewManager(t *testing.T) {
 	mgr := NewManager()
 	assert.False(t, mgr.Active(), "new manager should have no active overlay")
 	assert.Equal(t, KindNone, mgr.Kind())
+}
+
+func TestManager_HandleMouse_NoActiveOverlay(t *testing.T) {
+	mgr := NewManager()
+	out := mgr.HandleMouse(tea.MouseMsg{Button: tea.MouseButtonWheelDown, Action: tea.MouseActionPress})
+	assert.Equal(t, Outcome{}, out, "no active overlay returns zero Outcome")
+}
+
+func TestManager_Close_ClearsBounds(t *testing.T) {
+	mgr := NewManager()
+	mgr.OpenHelp(HelpSpec{})
+
+	ctx := RenderCtx{Width: 120, Height: 40, Resolver: style.PlainResolver()}
+	base := strings.Repeat(strings.Repeat(" ", ctx.Width)+"\n", ctx.Height)
+	_ = mgr.Compose(base, ctx)
+	require.NotZero(t, mgr.bounds.w, "Compose should have populated bounds")
+
+	mgr.Close()
+	assert.Equal(t, popupBounds{}, mgr.bounds, "Close must reset bounds to zero value")
 }
 
 func TestManager_OpenClose(t *testing.T) {
@@ -48,10 +68,10 @@ func TestManager_OpenClose(t *testing.T) {
 		assert.False(t, mgr.Active())
 	})
 
-	t.Run("commitInfo", func(t *testing.T) {
-		mgr.OpenCommitInfo(CommitInfoSpec{Applicable: true})
+	t.Run("info", func(t *testing.T) {
+		mgr.OpenInfo(InfoSpec{CommitsApplicable: true, CommitsLoaded: true})
 		assert.True(t, mgr.Active())
-		assert.Equal(t, KindCommitInfo, mgr.Kind())
+		assert.Equal(t, KindInfo, mgr.Kind())
 		mgr.Close()
 		assert.False(t, mgr.Active())
 	})
@@ -141,7 +161,7 @@ func TestInjectBorderTitle_Basic(t *testing.T) {
 	topLine := border.TopLeft + strings.Repeat(border.Top, 18) + border.TopRight
 	box := topLine + "\n│ content          │\n" + border.BottomLeft + strings.Repeat(border.Bottom, 18) + border.BottomRight
 
-	result := mgr.injectBorderTitle(box, " Title ", 20, "", "")
+	result := mgr.injectBorderTitle(box, " Title ", borderEdgeText{popupWidth: 20})
 	lines := strings.Split(result, "\n")
 	require.GreaterOrEqual(t, len(lines), 1)
 	assert.Contains(t, lines[0], "Title", "title should be injected into top border")
@@ -153,7 +173,7 @@ func TestInjectBorderTitle_EmptyTitle(t *testing.T) {
 	topLine := border.TopLeft + strings.Repeat(border.Top, 18) + border.TopRight
 	box := topLine + "\n│ content          │\n" + border.BottomLeft + strings.Repeat(border.Bottom, 18) + border.BottomRight
 
-	result := mgr.injectBorderTitle(box, "", 20, "", "")
+	result := mgr.injectBorderTitle(box, "", borderEdgeText{popupWidth: 20})
 	lines := strings.Split(result, "\n")
 	assert.Contains(t, lines[0], border.TopLeft, "empty title still produces valid border")
 }
@@ -164,7 +184,7 @@ func TestInjectBorderTitle_TitleTooWide(t *testing.T) {
 	topLine := border.TopLeft + strings.Repeat(border.Top, 4) + border.TopRight
 	box := topLine + "\n│ ok │"
 
-	result := mgr.injectBorderTitle(box, " very long title text ", 6, "", "")
+	result := mgr.injectBorderTitle(box, " very long title text ", borderEdgeText{popupWidth: 6})
 	assert.Equal(t, box, result, "too-wide title should leave box unchanged")
 }
 
@@ -177,7 +197,7 @@ func TestInjectBorderTitle_WithANSIColors(t *testing.T) {
 	accentFg := "\033[38;2;100;200;255m"
 	paneBg := "\033[48;2;30;30;50m"
 
-	result := mgr.injectBorderTitle(box, " Test ", 30, accentFg, paneBg)
+	result := mgr.injectBorderTitle(box, " Test ", borderEdgeText{popupWidth: 30, accentFg: accentFg, paneBg: paneBg})
 	lines := strings.Split(result, "\n")
 	require.GreaterOrEqual(t, len(lines), 1)
 	assert.Contains(t, lines[0], "Test", "title present")
@@ -193,7 +213,7 @@ func TestInjectBorderTitle_EmptyBgFallback(t *testing.T) {
 	topLine := border.TopLeft + strings.Repeat(border.Top, 18) + border.TopRight
 	box := topLine + "\n│ content          │"
 
-	result := mgr.injectBorderTitle(box, " Title ", 20, "", "")
+	result := mgr.injectBorderTitle(box, " Title ", borderEdgeText{popupWidth: 20})
 	lines := strings.Split(result, "\n")
 	assert.NotContains(t, lines[0], "\033[49m", "no bg reset when no bg color")
 	assert.NotContains(t, lines[0], "\033[48", "no bg escape when no bg color")
@@ -201,7 +221,7 @@ func TestInjectBorderTitle_EmptyBgFallback(t *testing.T) {
 
 func TestInjectBorderTitle_EmptyBox(t *testing.T) {
 	mgr := NewManager()
-	result := mgr.injectBorderTitle("", " Title ", 20, "", "")
+	result := mgr.injectBorderTitle("", " Title ", borderEdgeText{popupWidth: 20})
 	assert.Empty(t, result, "empty box returns empty")
 }
 
